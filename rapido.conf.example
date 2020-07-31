@@ -134,6 +134,16 @@ TARGET_IQN="iqn.2003-01.org.linux-iscsi:rapido"
 # correspond to the libiscsi test utility.
 INITIATOR_IQNS="iqn.2007-10.com.github:sahlberg:libiscsi:iscsi-test \
 		iqn.2007-10.com.github:sahlberg:libiscsi:iscsi-test-2"
+
+# optional CHAP username and password
+# e.g. ISCSI_USER="chapuser"
+#ISCSI_USER=""
+# e.g. ISCSI_PASS="chappass"
+#ISCSI_PASS=""
+# e.g. ISCSI_MUTUAL_USER="mutualuser"
+#ISCSI_MUTUAL_USER=""
+# e.g. ISCSI_MUTUAL_PASS="mutualpass"
+#ISCSI_MUTUAL_PASS=""
 ###########################
 
 ####### autorun/fstests_*.sh #######

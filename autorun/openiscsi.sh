@@ -34,6 +34,21 @@ iscsid || _fatal
 [ -n "$INITIATOR_DISCOVERY_ADDR" ] \
 	|| _fatal "INITIATOR_DISCOVERY_ADDR config required for SendTargets"
 iscsiadm -m discovery -t sendtargets -p $INITIATOR_DISCOVERY_ADDR || _fatal
+
+# auth for normal (non-discovery) sessions
+for i in $(ls /etc/iscsi/nodes/*/*/default); do
+	if [[ -n "${ISCSI_USER}${ISCSI_PASS}" ]]; then
+		sed -i "s#node.session.auth.authmethod = .*#node.session.auth.authmethod = CHAP#" $i
+		echo "node.session.auth.username = $ISCSI_USER" >> $i
+		echo "node.session.auth.password = $ISCSI_PASS" >> $i
+	fi
+
+	if [[ -n "${ISCSI_MUTUAL_USER}${ISCSI_MUTUAL_PASS}" ]]; then
+		echo "node.session.auth.username_in = $ISCSI_MUTUAL_USER" >> $i
+		echo "node.session.auth.password_in = $ISCSI_MUTUAL_PASS" >> $i
+	fi
+done
+
 # login to all discovered targets
 iscsiadm -m node -l all || _fatal
 set +x

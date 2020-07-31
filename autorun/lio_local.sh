@@ -143,8 +143,21 @@ for tpgt in tpgt_1 tpgt_2; do
 	echo 1 > /sys/kernel/config/target/iscsi/${TARGET_IQN}/${tpgt}/attrib/generate_node_acls
 	echo 2 > /sys/kernel/config/target/iscsi/${TARGET_IQN}/${tpgt}/attrib/netif_timeout
 	echo 15 > /sys/kernel/config/target/iscsi/${TARGET_IQN}/${tpgt}/attrib/login_timeout
-	# disable auth
-	echo 0 > /sys/kernel/config/target/iscsi/${TARGET_IQN}/${tpgt}/attrib/authentication
+
+	#### authentication for iSCSI Target Portal Group
+	if [[ -n "${ISCSI_USER}${ISCSI_PASS}" ]]; then
+		echo 1 > /sys/kernel/config/target/iscsi/${TARGET_IQN}/${tpgt}/attrib/authentication
+		echo -n "$ISCSI_USER" > /sys/kernel/config/target/iscsi/${TARGET_IQN}/${tpgt}/auth/userid
+		echo -n "$ISCSI_PASS" > /sys/kernel/config/target/iscsi/${TARGET_IQN}/${tpgt}/auth/password
+	else
+		# disable auth
+		echo 0 > /sys/kernel/config/target/iscsi/${TARGET_IQN}/${tpgt}/attrib/authentication
+	fi
+
+	if [[ -n "${ISCSI_MUTUAL_USER}${ISCSI_MUTUAL_PASS}" ]]; then
+		echo -n "$ISCSI_MUTUAL_USER" > /sys/kernel/config/target/iscsi/${TARGET_IQN}/${tpgt}/auth/userid_mutual
+		echo -n "$ISCSI_MUTUAL_PASS" > /sys/kernel/config/target/iscsi/${TARGET_IQN}/${tpgt}/auth/password_mutual
+	fi
 
 	#### authentication for iSCSI Target Portal Group
 	#### Parameters for iSCSI Target Portal Group
@@ -180,7 +193,16 @@ for tpgt in tpgt_1 tpgt_2; do
 		mkdir -p /sys/kernel/config/target/iscsi/${TARGET_IQN}/${tpgt}/acls/${initiator}
 		[ $? -eq 0 ] || _fatal
 		echo 64 > /sys/kernel/config/target/iscsi/${TARGET_IQN}/${tpgt}/acls/${initiator}/cmdsn_depth
-		#### iSCSI Initiator ACL authentication information
+		#### per-Initiator ACL auth needs explicit config. It's not inherited from parent TPG
+		if [[ -n "${ISCSI_USER}${ISCSI_PASS}" ]]; then
+			echo -n "$ISCSI_USER" > /sys/kernel/config/target/iscsi/${TARGET_IQN}/${tpgt}/acls/${initiator}/auth/userid
+			echo -n "$ISCSI_PASS" > /sys/kernel/config/target/iscsi/${TARGET_IQN}/${tpgt}/acls/${initiator}/auth/password
+		fi
+		if [[ -n "${ISCSI_MUTUAL_USER}${ISCSI_MUTUAL_PASS}" ]]; then
+			echo -n "$ISCSI_MUTUAL_USER" > /sys/kernel/config/target/iscsi/${TARGET_IQN}/${tpgt}/acls/${initiator}/auth/userid_mutual
+			echo -n "$ISCSI_MUTUAL_PASS" > /sys/kernel/config/target/iscsi/${TARGET_IQN}/${tpgt}/acls/${initiator}/auth/password_mutual
+		fi
+
 		#### iSCSI Initiator ACL TPG attributes
 		echo 0 > /sys/kernel/config/target/iscsi/${TARGET_IQN}/${tpgt}/acls/${initiator}/attrib/random_r2t_offsets
 		echo 0 > /sys/kernel/config/target/iscsi/${TARGET_IQN}/${tpgt}/acls/${initiator}/attrib/random_datain_seq_offsets
