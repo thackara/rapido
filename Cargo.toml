@@ -7,5 +7,5 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
-crosvm = { path = "third_party/crosvm" }
+crosvm = { path = "src/third_party/crosvm" }
 # please avoid adding any more dependencies
