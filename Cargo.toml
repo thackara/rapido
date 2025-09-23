@@ -6,6 +6,12 @@ license = "GPL-2.0"
 version = "0.1.0"
 edition = "2018"
 
+[lib]
+name = "cpio"
+path = "src/cpio.rs"
+
+# non-lib source for binaries is carried under src/bin/
+
 [dependencies]
 crosvm = { path = "src/third_party/crosvm" }
 # please avoid adding any more dependencies
