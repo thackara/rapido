@@ -7,7 +7,6 @@ use std::fs;
 use std::io;
 use std::io::prelude::*;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use crosvm::argument::{self, Argument};
@@ -244,6 +243,7 @@ mod tests {
     use super::*;
     use std::cmp;
     use std::os::unix::fs as unixfs;
+    use std::os::unix::fs::MetadataExt;
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
 
