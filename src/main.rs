@@ -157,7 +157,7 @@ impl ArchiveState {
         outpath: &Path,
         mapped_ino: &mut Option<u32>,
         mapped_nlink: &mut Option<u32>,
-    ) -> std::io::Result<bool> {
+    ) -> io::Result<bool> {
         assert!(md.nlink() > 1);
         let index = u64::from(major) << 32 | u64::from(minor);
         // reverse index->major/minor conversion that was just done
@@ -284,7 +284,7 @@ fn archive_path<W: Seek + Write>(
     props: &ArchiveProperties,
     path: &Path,
     mut writer: W,
-) -> std::io::Result<()> {
+) -> io::Result<()> {
     let inpath = path;
     let mut outpath = path;
     let mut datalen: u32 = 0;
@@ -513,7 +513,7 @@ fn archive_flush_unseen_hardlinks<W: Write + Seek>(
     state: &mut ArchiveState,
     props: &ArchiveProperties,
     mut writer: W,
-) -> std::io::Result<()> {
+) -> io::Result<()> {
     let mut deferred_inpaths: Vec<PathBuf> = Vec::new();
     for id in state.ids.iter_mut() {
         for hl in id.hls.iter_mut() {
@@ -551,7 +551,7 @@ fn archive_flush_unseen_hardlinks<W: Write + Seek>(
     Ok(())
 }
 
-fn archive_trailer<W: Write>(mut writer: W, cur_off: u64) -> std::io::Result<u64> {
+fn archive_trailer<W: Write>(mut writer: W, cur_off: u64) -> io::Result<u64> {
     let fname = "TRAILER!!!";
     let fname_len = fname.len() + 1;
 
@@ -592,7 +592,7 @@ fn archive_loop<R: BufRead, W: Seek + Write>(
     mut reader: R,
     mut writer: W,
     props: &ArchiveProperties,
-) -> std::io::Result<u64> {
+) -> io::Result<u64> {
     if props.data_align > 0 && (props.initial_data_off + u64::from(props.data_align)) % 4 != 0 {
         // must satisfy both data_align and cpio 4-byte padding alignment
         return Err(io::Error::new(
@@ -771,7 +771,7 @@ fn params_process(props: &mut ArchiveProperties) -> argument::Result<PathBuf> {
     Ok(PathBuf::from(&last_arg))
 }
 
-fn main() -> std::io::Result<()> {
+fn main() -> io::Result<()> {
     let mut props = ArchiveProperties::default();
     let output_path = match params_process(&mut props) {
         Ok(p) => p,
@@ -790,7 +790,7 @@ fn main() -> std::io::Result<()> {
     }
     let mut writer = io::BufWriter::new(f);
 
-    let stdin = std::io::stdin();
+    let stdin = io::stdin();
     let mut reader = io::BufReader::new(stdin);
 
     let _wrote = archive_loop(&mut reader, &mut writer, &props)?;
