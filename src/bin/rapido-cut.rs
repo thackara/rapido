@@ -2,11 +2,15 @@
 // Copyright (C) 2025 SUSE LLC
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::env;
 use std::io;
 use std::os::unix::fs::MetadataExt;
+use std::path::PathBuf;
 use elf::abi;
 use elf::ElfBytes;
 use elf::endian::AnyEndian;
+
+use crosvm::argument::{self, Argument};
 
 // Don't print debug messages on release builds...
 #[cfg(debug_assertions)]
@@ -19,7 +23,7 @@ macro_rules! dout {
 }
 
 struct Fsent {
-    path: std::path::PathBuf,
+    path: PathBuf,
     md: std::fs::Metadata,
 }
 
@@ -42,7 +46,7 @@ fn path_stat(name: String, paths: &[&str]) -> Option<Fsent> {
     }
 
     for dir in paths.iter() {
-        let p = std::path::PathBuf::from(dir).join(rname);
+        let p = PathBuf::from(dir).join(rname);
         let md = std::fs::symlink_metadata(&p);
         if md.is_ok() {
             return Some(Fsent {path: p, md: md.unwrap()});
@@ -55,7 +59,7 @@ fn path_stat(name: String, paths: &[&str]) -> Option<Fsent> {
 // Parse ELF NEEDED entries to gather shared object dependencies
 // This function intentionally ignores any DT_RPATH paths.
 // FIXME don't parse entire file - read header only
-fn elf_deps(path: &std::path::PathBuf, dups_filter: &mut HashMap<String, u64>) -> Result<Vec<String>, io::Error> {
+fn elf_deps(path: &PathBuf, dups_filter: &mut HashMap<String, u64>) -> Result<Vec<String>, io::Error> {
     let mut ret: Vec<String> = vec![];
     let file_data = std::fs::read(&path)?;
     let slice = file_data.as_slice();
@@ -120,6 +124,65 @@ fn elf_deps(path: &std::path::PathBuf, dups_filter: &mut HashMap<String, u64>) -
     Ok(ret)
 }
 
+fn args_usage(params: &[Argument]) {
+    argument::print_help("rapido-cut", "OUTPUT", params);
+}
+
+fn args_process(inst: &mut Vec<String>) -> argument::Result<PathBuf> {
+    let params = &[
+        Argument::positional("OUTPUT", "Write initramfs archive to this file path."),
+        Argument::value(
+            "install",
+            "FILES",
+            "space separated list of files to put in initramfs with ELF dependencies.",
+        ),
+        Argument::short_flag('h', "help", "Print help message."),
+    ];
+
+    let mut positional_args = 0;
+    let args = env::args().skip(1); // skip binary name
+    let match_res = argument::set_arguments(args, params, |name, value| {
+        match name {
+            "" => positional_args += 1,
+            "install" => {
+                let inst_parsed: argument::Result<Vec<String>> = value
+                    .unwrap()
+                    .split(' ')
+                    .map(|f| {
+                        f.parse().map_err(|_| argument::Error::InvalidValue {
+                            value: f.to_owned(),
+                            expected: String::from("FILES must be utf-8 strings"),
+                        })
+                    })
+                    .collect();
+
+                inst.append(&mut inst_parsed?);
+            }
+            "help" => return Err(argument::Error::PrintHelp),
+            _ => unreachable!(),
+        };
+        Ok(())
+    });
+
+    match match_res {
+        Ok(_) => {
+            if positional_args != 1 {
+                args_usage(params);
+                return Err(argument::Error::ExpectedArgument(
+                    "one OUTPUT parameter required".to_string(),
+                ));
+            }
+        }
+        Err(e) => {
+            args_usage(params);
+            return Err(e);
+        }
+    }
+
+    let last_arg = env::args_os().last().unwrap();
+    Ok(PathBuf::from(&last_arg))
+}
+
 fn main() -> io::Result<()> {
     struct Gather {
         // needed paths are added to the end of the gather list as they are found.
@@ -144,7 +207,7 @@ fn main() -> io::Result<()> {
 
     let mut state = State {
         bins: Gather {
-            names: vec!("ls".to_string()),
+            names: vec!(),
             off: 0,
             missing: vec!(),
         },
@@ -154,6 +217,12 @@ fn main() -> io::Result<()> {
             missing: vec!(),
         },
         found: vec!(),
+    };
+
+    let _output_path = match args_process(&mut state.bins.names) {
+        Ok(p) => p,
+        Err(argument::Error::PrintHelp) => return Ok(()),
+        Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidInput, e.to_string())),
     };
 
     // @libs_seen is an optimization to avoid resolving already-seen elf deps.
