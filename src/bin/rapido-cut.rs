@@ -3,7 +3,10 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::env;
+use std::fs;
 use std::io;
+use std::io::Seek;
+use std::io::Write;
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use elf::abi;
@@ -24,7 +27,7 @@ macro_rules! dout {
 
 struct Fsent {
     path: PathBuf,
-    md: std::fs::Metadata,
+    md: fs::Metadata,
 }
 
 const BIN_PATHS: [&str; 2] = [ "/usr/bin", "/usr/sbin" ];
@@ -39,7 +42,7 @@ fn path_stat(name: String, paths: &[&str]) -> Option<Fsent> {
     // or absolute path. This should be close enough as a check.
     if name.contains(std::path::MAIN_SEPARATOR_STR) {
         dout!("using relative / absolute path {:?} as-is", rname);
-        return match std::fs::symlink_metadata(rname) {
+        return match fs::symlink_metadata(rname) {
             Ok(md) => Some(Fsent {path: rname.to_path_buf(), md: md}),
             Err(_) => None,
         }
@@ -47,7 +50,7 @@ fn path_stat(name: String, paths: &[&str]) -> Option<Fsent> {
 
     for dir in paths.iter() {
         let p = PathBuf::from(dir).join(rname);
-        let md = std::fs::symlink_metadata(&p);
+        let md = fs::symlink_metadata(&p);
         if md.is_ok() {
             return Some(Fsent {path: p, md: md.unwrap()});
         }
@@ -61,7 +64,7 @@ fn path_stat(name: String, paths: &[&str]) -> Option<Fsent> {
 // FIXME don't parse entire file - read header only
 fn elf_deps(path: &PathBuf, dups_filter: &mut HashMap<String, u64>) -> Result<Vec<String>, io::Error> {
     let mut ret: Vec<String> = vec![];
-    let file_data = std::fs::read(&path)?;
+    let file_data = fs::read(&path)?;
     let slice = file_data.as_slice();
     // TODO check for 4 byte ELF header first
     let file = match ElfBytes::<AnyEndian>::minimal_parse(slice) {
@@ -219,11 +222,30 @@ fn main() -> io::Result<()> {
         found: vec!(),
     };
 
-    let _output_path = match args_process(&mut state.bins.names) {
+
+    let cpio_out_path = match args_process(&mut state.bins.names) {
         Ok(p) => p,
         Err(argument::Error::PrintHelp) => return Ok(()),
         Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidInput, e.to_string())),
     };
+
+    let mut cpio_props = cpio::ArchiveProperties::default();
+    // for rapido we normally want to truncate any existing output file
+    cpio_props.truncate_existing = true;
+    // Attempt 4K file data alignment within archive for Btrfs/XFS reflinks
+    cpio_props.data_align = 4096;
+    let mut cpio_state = cpio::ArchiveState::new(cpio_props.initial_ino);
+
+    let mut cpio_f = fs::OpenOptions::new()
+        .read(false)
+        .write(true)
+        .create(true)
+        .truncate(cpio_props.truncate_existing)
+        .open(&cpio_out_path)?;
+    if !cpio_props.truncate_existing {
+        cpio_props.initial_data_off = cpio_f.seek(io::SeekFrom::End(0))?;
+    }
+    let mut cpio_writer = io::BufWriter::new(cpio_f);
 
     // @libs_seen is an optimization to avoid resolving already-seen elf deps.
     let mut libs_seen_filter: HashMap<String, u64> = HashMap::new();
@@ -234,7 +256,7 @@ fn main() -> io::Result<()> {
         match path_stat(this_bin.clone(), &BIN_PATHS) {
             Some(got) => {
                 if got.md.file_type().is_symlink() {
-                    let symlink_tgt = std::fs::read_link(&got.path)?;
+                    let symlink_tgt = fs::read_link(&got.path)?;
                     // FIXME this could loop endlessly; filter dups
                     // FIXME error
                     state.bins.names.push(symlink_tgt.into_os_string().into_string().unwrap());
@@ -252,7 +274,9 @@ fn main() -> io::Result<()> {
                 }
                 // don't check for '#!' interpreters like Dracut, it's messy
 
-                println!("found bin: {:?}", got.path);
+                // TODO: use got.md and open handle from elf_deps()
+                cpio::archive_path(&mut cpio_state, &cpio_props, &got.path, &mut cpio_writer)?;
+                println!("archived bin: {:?}", got.path);
                 state.found.push(got);
             },
             None => {
@@ -267,7 +291,7 @@ fn main() -> io::Result<()> {
         match path_stat(this_lib.clone(), &LIB_PATHS) {
             Some(got) => {
                 if got.md.file_type().is_symlink() {
-                    let symlink_tgt = std::fs::read_link(&got.path).expect("TODO no target for symlink");
+                    let symlink_tgt = fs::read_link(&got.path).expect("TODO no target for symlink");
                     // FIXME this could loop endlessly; filter dups
                     // FIXME error
                     state.libs.names.push(symlink_tgt.into_os_string().into_string().unwrap());
@@ -284,7 +308,9 @@ fn main() -> io::Result<()> {
                     }
                 }
 
-                println!("found lib: {:?}", got.path);
+                // TODO: use got.md and open handle from elf_deps()
+                cpio::archive_path(&mut cpio_state, &cpio_props, &got.path, &mut cpio_writer)?;
+                println!("archived lib: {:?}", got.path);
                 state.found.push(got);
             },
             None => {
@@ -293,6 +319,10 @@ fn main() -> io::Result<()> {
         };
         state.libs.off += 1;
     }
+
+    cpio::archive_flush_unseen_hardlinks(&mut cpio_state, &cpio_props, &mut cpio_writer)?;
+    cpio::archive_trailer(&mut cpio_writer, cpio_state.off)?;
+    cpio_writer.flush()?;
 
     Ok(())
 }
