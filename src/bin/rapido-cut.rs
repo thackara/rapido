@@ -10,7 +10,7 @@ use std::io::Write;
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use elf::abi;
-use elf::ElfBytes;
+use elf::ElfStream;
 use elf::endian::AnyEndian;
 
 use crosvm::argument::{self, Argument};
@@ -35,7 +35,7 @@ const LIB_PATHS: [&str; 2] = [ "/usr/lib64", "/usr/lib" ];
 
 // We *should* be running as an unprivileged process, so don't filter or block
 // access to parent or special paths; this should all be handled by the OS.
-fn path_stat(name: String, paths: &[&str]) -> Option<Fsent> {
+fn path_stat(name: String, search_paths: &[&str]) -> Option<Fsent> {
     dout!("resolving path for {:?}", name);
     let rname = std::path::Path::new(&name);
     // if name has any separator in it then we should handle it as a relative
@@ -48,7 +48,7 @@ fn path_stat(name: String, paths: &[&str]) -> Option<Fsent> {
         }
     }
 
-    for dir in paths.iter() {
+    for dir in search_paths.iter() {
         let p = PathBuf::from(dir).join(rname);
         let md = fs::symlink_metadata(&p);
         if md.is_ok() {
@@ -61,31 +61,17 @@ fn path_stat(name: String, paths: &[&str]) -> Option<Fsent> {
 
 // Parse ELF NEEDED entries to gather shared object dependencies
 // This function intentionally ignores any DT_RPATH paths.
-// FIXME don't parse entire file - read header only
 fn elf_deps(path: &PathBuf, dups_filter: &mut HashMap<String, u64>) -> Result<Vec<String>, io::Error> {
     let mut ret: Vec<String> = vec![];
-    let file_data = fs::read(&path)?;
-    let slice = file_data.as_slice();
-    // TODO check for 4 byte ELF header first
-    let file = match ElfBytes::<AnyEndian>::minimal_parse(slice) {
+    let f = fs::OpenOptions::new().read(true).open(path)?;
+
+    let mut file = match ElfStream::<AnyEndian, _>::open_stream(f) {
         Ok(f) => f,
         Err(e) => {
-            // uniqe error for missing ELF header
+            // ParseError::BadOffset / ParseError::BadMagic is returned
+            // immediately for empty / non-elf, which we want to ignore.
             return Err(io::Error::new(io::ErrorKind::InvalidInput,
                     e.to_string()));
-        },
-    };
-
-    let dynsyms_strs = match file.find_common_data() {
-        Err(e) => {
-            return Err(io::Error::new(io::ErrorKind::Other, e.to_string()));
-        },
-        Ok(common) => {
-            if common.dynsyms_strs.is_none() {
-                dout!("no string table for {:?}", path);
-                return Ok(ret);
-            }
-            common.dynsyms_strs.unwrap()
         },
     };
 
@@ -102,11 +88,32 @@ fn elf_deps(path: &PathBuf, dups_filter: &mut HashMap<String, u64>) -> Result<Ve
         },
     };
 
-    for dyna in dynamics.iter() {
-        if dyna.d_tag != abi::DT_NEEDED {
-            continue;
-        }
-        let str_off: usize = dyna.d_val().try_into().expect("failed to get dyna offset");
+    let dyna_offs: Vec<usize> = dynamics.iter()
+        .filter_map(|dyna| {
+            if dyna.d_tag != abi::DT_NEEDED {
+                return None;
+            }
+            let str_off: usize = dyna.d_val().try_into()
+                .expect("failed to get dyna offset");
+            Some(str_off)
+        })
+        .collect();
+
+    let dynsyms_strs = match file.dynamic_symbol_table() {
+        Err(e) => {
+            return Err(io::Error::new(io::ErrorKind::Other, e.to_string()));
+        },
+        Ok(tup) => {
+            if tup.is_none() {
+                dout!("no tables for {:?}", path);
+                return Ok(ret);
+            }
+            let (_, strs) = tup.unwrap();
+            strs
+        },
+    };
+
+    for str_off in dyna_offs {
         match dynsyms_strs.get(str_off) {
             Ok(sraw) => {
                 let s = sraw.to_string();
@@ -205,7 +212,6 @@ fn main() -> io::Result<()> {
 
         // located bins and libs paths with stat info
         found: Vec<Fsent>,
-
     }
 
     let mut state = State {

@@ -18,6 +18,6 @@ path = "src/cpio.rs"
 [dependencies]
 # minimal command line parameter passing
 crosvm = { path = "src/third_party/crosvm" }
-# parse ELF to determine binary / library dependencies
-elf = { default-features = false, path = "src/third_party/rust-elf" }
+# Parse ELF to determine library dependencies. "std" provides file seek API.
+elf = { default-features = false, features = ["std"], path = "src/third_party/rust-elf" }
 # please avoid adding any more dependencies
