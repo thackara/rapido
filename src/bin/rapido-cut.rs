@@ -209,9 +209,6 @@ fn main() -> io::Result<()> {
         // TODO: kmods: Gather,
         // TODO: data: Gather,  // don't check for elf deps? or just rename "bins" to "files" and
         // check exec bit?
-
-        // located bins and libs paths with stat info
-        found: Vec<Fsent>,
     }
 
     let mut state = State {
@@ -225,7 +222,6 @@ fn main() -> io::Result<()> {
             off: 0,
             missing: vec!(),
         },
-        found: vec!(),
     };
 
 
@@ -283,7 +279,6 @@ fn main() -> io::Result<()> {
                 // TODO: use got.md and open handle from elf_deps()
                 cpio::archive_path(&mut cpio_state, &cpio_props, &got.path, &mut cpio_writer)?;
                 println!("archived bin: {:?}", got.path);
-                state.found.push(got);
             },
             None => {
                 state.bins.missing.push(state.bins.off);
@@ -317,7 +312,6 @@ fn main() -> io::Result<()> {
                 // TODO: use got.md and open handle from elf_deps()
                 cpio::archive_path(&mut cpio_state, &cpio_props, &got.path, &mut cpio_writer)?;
                 println!("archived lib: {:?}", got.path);
-                state.found.push(got);
             },
             None => {
                 state.libs.missing.push(state.libs.off);
