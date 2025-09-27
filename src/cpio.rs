@@ -279,6 +279,7 @@ pub fn archive_path<W: Seek + Write>(
     state: &mut ArchiveState,
     props: &ArchiveProperties,
     path: &Path,
+    md: &fs::Metadata,
     mut writer: W,
 ) -> io::Result<()> {
     let inpath = path;
@@ -306,13 +307,6 @@ pub fn archive_path<W: Seek + Write>(
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "path too long"));
     }
 
-    let md = match fs::symlink_metadata(inpath) {
-        Ok(m) => m,
-        Err(e) => {
-            println!("failed to get metadata for {}: {}", inpath.display(), e);
-            return Err(e);
-        }
-    };
     dout!("archiving {} with mode {:o}", outpath.display(), md.mode());
 
     let (major, minor) = match state.dev_seen(md.dev()) {
@@ -540,7 +534,8 @@ pub fn archive_flush_unseen_hardlinks<W: Write + Seek>(
 
         // .reverse() to match gnu ordering
         for p in deferred_inpaths.iter().rev() {
-            archive_path(state, props, p.as_path(), &mut writer)?;
+            let md = fs::symlink_metadata(p.as_path())?;
+            archive_path(state, props, p.as_path(), &md, &mut writer)?;
         }
     }
 
