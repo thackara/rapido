@@ -61,9 +61,8 @@ fn path_stat(name: String, search_paths: &[&str]) -> Option<Fsent> {
 
 // Parse ELF NEEDED entries to gather shared object dependencies
 // This function intentionally ignores any DT_RPATH paths.
-fn elf_deps(path: &PathBuf, dups_filter: &mut HashMap<String, u64>) -> Result<Vec<String>, io::Error> {
+fn elf_deps(f: &fs::File, path: &PathBuf, dups_filter: &mut HashMap<String, u64>) -> Result<Vec<String>, io::Error> {
     let mut ret: Vec<String> = vec![];
-    let f = fs::OpenOptions::new().read(true).open(path)?;
 
     let mut file = match ElfStream::<AnyEndian, _>::open_stream(f) {
         Ok(f) => f,
@@ -263,8 +262,8 @@ fn main() -> io::Result<()> {
                     // FIXME error
                     state.bins.names.push(symlink_tgt.into_os_string().into_string().unwrap());
                 } else if got.md.mode() & 0o111 != 0 {
-                    // one or more exec flags set: check for elf deps.
-                    match elf_deps(&got.path, &mut libs_seen_filter) {
+                    let f = fs::OpenOptions::new().read(true).open(&got.path)?;
+                    match elf_deps(&f, &got.path, &mut libs_seen_filter) {
                         Ok(mut d) => state.libs.names.append(&mut d),
                         Err(ref e) if e.kind() == io::ErrorKind::InvalidInput => {
                             dout!("executable {:?} not an elf", this_bin);
@@ -276,8 +275,7 @@ fn main() -> io::Result<()> {
                 }
                 // don't check for '#!' interpreters like Dracut, it's messy
 
-                // TODO: use got.md and open handle from elf_deps()
-                cpio::archive_path(&mut cpio_state, &cpio_props, &got.path, &mut cpio_writer)?;
+                cpio::archive_path(&mut cpio_state, &cpio_props, &got.path, &got.md, &mut cpio_writer)?;
                 println!("archived bin: {:?}", got.path);
             },
             None => {
@@ -297,8 +295,8 @@ fn main() -> io::Result<()> {
                     // FIXME error
                     state.libs.names.push(symlink_tgt.into_os_string().into_string().unwrap());
                 } else {
-                    // check for elf deps.
-                    match elf_deps(&got.path, &mut libs_seen_filter) {
+                    let f = fs::OpenOptions::new().read(true).open(&got.path)?;
+                    match elf_deps(&f, &got.path, &mut libs_seen_filter) {
                         Ok(mut d) => state.libs.names.append(&mut d),
                         Err(ref e) if e.kind() == io::ErrorKind::InvalidInput => {
                             dout!("{:?} not an elf", this_lib);
@@ -309,8 +307,7 @@ fn main() -> io::Result<()> {
                     }
                 }
 
-                // TODO: use got.md and open handle from elf_deps()
-                cpio::archive_path(&mut cpio_state, &cpio_props, &got.path, &mut cpio_writer)?;
+                cpio::archive_path(&mut cpio_state, &cpio_props, &got.path, &got.md, &mut cpio_writer)?;
                 println!("archived lib: {:?}", got.path);
             },
             None => {
