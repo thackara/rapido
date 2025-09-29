@@ -494,6 +494,197 @@ pub fn archive_path<W: Seek + Write>(
     Ok(())
 }
 
+pub fn archive_file<W: Seek + Write>(
+    state: &mut ArchiveState,
+    props: &ArchiveProperties,
+    path: &Path,
+    md: &fs::Metadata,
+    in_file: &fs::File,
+    mut writer: W,
+) -> io::Result<()> {
+    let inpath = path;
+    let mut outpath = path;
+    let mut hardlink_ino: Option<u32> = None;
+    let mut hardlink_nlink: Option<u32> = None;
+    let mut data_align_seek: u32 = 0;
+
+    if !md.file_type().is_file() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a file"));
+    }
+
+    outpath = match outpath.strip_prefix("./") {
+        Ok(p) => {
+            if p.as_os_str().as_bytes().len() == 0 {
+                outpath // retain './' and '.' paths
+            } else {
+                p
+            }
+        }
+        Err(_) => outpath,
+    };
+    let fname = outpath.as_os_str().as_bytes();
+    if fname.len() + 1 >= PATH_MAX.try_into().unwrap() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "path too long"));
+    }
+
+    dout!("archiving file {} with mode {:o}", outpath.display(), md.mode());
+
+    let (major, minor) = match state.dev_seen(md.dev()) {
+        Some((maj, min)) => (maj, min),
+        None => return Err(io::Error::new(io::ErrorKind::Other, "failed to map dev")),
+    };
+
+    let mtime: u32 = match props.fixed_mtime {
+        Some(t) => t,
+        None => {
+            // check for 2106 epoch overflow
+            if md.mtime() > i64::from(u32::MAX) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "mtime too large for cpio",
+                ));
+            }
+            md.mtime().try_into().unwrap()
+        }
+    };
+
+    let datalen: u32 = {
+        if md.len() > u64::from(u32::MAX) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "file too large for newc",
+            ));
+        }
+        md.len().try_into().unwrap()
+    };
+
+    if md.nlink() > 1 {
+        if md.nlink() > u32::MAX as u64 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "nlink too large",
+            ));
+        }
+
+        // follow GNU cpio's behaviour of attaching hardlink data only to
+        // the last entry in the archive.
+        let deferred = state.hardlink_seen(
+            &props,
+            &mut writer,
+            major,
+            minor,
+            md.clone(),
+            &inpath,
+            outpath,
+            &mut hardlink_ino,
+            &mut hardlink_nlink,
+        )?;
+        if deferred {
+            dout!("deferring hardlink {} data portion", outpath.display());
+            return Ok(());
+        }
+    }
+
+    if props.data_align > 0 && datalen > props.data_align {
+        // XXX we're "bending" the newc spec a bit here to inject zeros
+        // after fname to provide data segment alignment. These zeros are
+        // accounted for in the namesize, but some applications may only
+        // expect a single zero-terminator (and 4 byte alignment). GNU cpio
+        // and Linux initramfs handle this fine as long as PATH_MAX isn't
+        // exceeded.
+        data_align_seek = {
+            let len: u64 = archive_padlen(
+                props.initial_data_off + state.off + NEWC_HDR_LEN + fname.len() as u64 + 1,
+                u64::from(props.data_align),
+            );
+            let padded_namesize = len + fname.len() as u64 + 1;
+            if padded_namesize > u64::from(props.namesize_max) {
+                dout!(
+                    "{} misaligned. Required padding {} exceeds namesize maximum {}.",
+                    outpath.display(),
+                    len,
+                    props.namesize_max
+                );
+                0
+            } else {
+                len.try_into().unwrap()
+            }
+        };
+    }
+
+    write!(
+        writer,
+        NEWC_HDR_FMT!(),
+        magic = "070701",
+        ino = match hardlink_ino {
+            Some(i) => i,
+            None => {
+                let i = state.ino;
+                state.ino += 1;
+                i
+            }
+        },
+        mode = md.mode(),
+        uid = match props.fixed_uid {
+            Some(u) => u,
+            None => md.uid(),
+        },
+        gid = match props.fixed_gid {
+            Some(g) => g,
+            None => md.gid(),
+        },
+        nlink = match hardlink_nlink {
+            Some(n) => n,
+            None => md.nlink().try_into().unwrap(),
+        },
+        mtime = mtime,
+        filesize = datalen,
+        major = major,
+        minor = major,
+        rmajor = 0,
+        rminor = 0,
+        namesize = fname.len() + 1 + data_align_seek as usize,
+        chksum = 0
+    )?;
+    state.off += NEWC_HDR_LEN;
+
+    writer.write_all(fname)?;
+    state.off += fname.len() as u64;
+
+    let mut seek_len: i64 = 1; // fname nulterm
+    if data_align_seek > 0 {
+        seek_len += data_align_seek as i64;
+        assert_eq!(archive_padlen(state.off + seek_len as u64, 4), 0);
+    } else {
+        let padding_len = archive_padlen(state.off + seek_len as u64, 4);
+        seek_len += padding_len as i64;
+    }
+    {
+        let z = vec![0u8; seek_len.try_into().unwrap()];
+        writer.write_all(&z)?;
+    }
+    state.off += seek_len as u64;
+
+    // io::copy() can reflink: https://github.com/rust-lang/rust/pull/75272 \o/
+    if datalen > 0 {
+        let mut reader = io::BufReader::new(in_file);
+        let copied = io::copy(&mut reader, &mut writer)?;
+        if copied != u64::from(datalen) {
+            dout!("copied {}, expected {}", copied, datalen);
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "copy returned unexpected length",
+            ));
+        }
+        state.off += u64::from(datalen);
+        let dpad_len: usize = archive_padlen(state.off, 4).try_into().unwrap();
+        write!(writer, "{pad:.padlen$}", padlen = dpad_len, pad = "\0\0\0")?;
+        state.off += dpad_len as u64;
+    }
+
+    Ok(())
+}
+
 pub fn archive_padlen(off: u64, alignment: u64) -> u64 {
     (alignment - (off & (alignment - 1))) % alignment
 }
