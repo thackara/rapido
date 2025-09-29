@@ -133,6 +133,36 @@ fn elf_deps(f: &fs::File, path: &PathBuf, dups_filter: &mut HashMap<String, u64>
     Ok(ret)
 }
 
+fn gather_archive_file<W: Seek + Write>(
+    path: &PathBuf,
+    md: &fs::Metadata,
+    mode_mask: Option<u32>,
+    libs_names: &mut Vec<String>,
+    libs_seen_filter: &mut HashMap<String, u64>,
+    cpio_state: &mut cpio::ArchiveState,
+    cpio_props: &cpio::ArchiveProperties,
+    mut cpio_writer: W,
+) -> io::Result<()> {
+    let mut f = fs::OpenOptions::new().read(true).open(&path)?;
+    if mode_mask.is_none() || mode_mask.unwrap() & md.mode() != 0 {
+        match elf_deps(&f, &path, libs_seen_filter) {
+            Ok(mut d) => libs_names.append(&mut d),
+            Err(ref e) if e.kind() == io::ErrorKind::InvalidInput => {
+                dout!("executable {:?} not an elf", path);
+            },
+            Err(e) => {
+                dout!("failed to obtain dependencies for elf {:?}: {:?}", path, e);
+            },
+        }
+    }
+    // don't check for '#!' interpreters like Dracut, it's messy
+
+    f.seek(io::SeekFrom::Start(0))?;
+    cpio::archive_file(cpio_state, &cpio_props, &path, &md, &f, &mut cpio_writer)?;
+
+    Ok(())
+}
+
 fn args_usage(params: &[Argument]) {
     argument::print_help("rapido-cut", "OUTPUT", params);
 }
@@ -207,7 +237,6 @@ fn main() -> io::Result<()> {
         libs: Gather,
         // TODO: kmods: Gather,
         // TODO: data: Gather,  // don't check for elf deps? or just rename "bins" to "files" and
-        // check exec bit?
     }
 
     let mut state = State {
@@ -253,30 +282,22 @@ fn main() -> io::Result<()> {
 
     // process bins first, as they may add to libs *and* bins
     while let Some(this_bin) = state.bins.names.get(state.bins.off) {
-        // XXX: check the current directory, or require "./" prefix?
         match path_stat(this_bin.clone(), &BIN_PATHS) {
-            Some(got) => {
-                if got.md.file_type().is_symlink() {
-                    let symlink_tgt = fs::read_link(&got.path)?;
-                    // FIXME this could loop endlessly; filter dups
-                    // FIXME error
-                    state.bins.names.push(symlink_tgt.into_os_string().into_string().unwrap());
-                } else if got.md.mode() & 0o111 != 0 {
-                    let f = fs::OpenOptions::new().read(true).open(&got.path)?;
-                    match elf_deps(&f, &got.path, &mut libs_seen_filter) {
-                        Ok(mut d) => state.libs.names.append(&mut d),
-                        Err(ref e) if e.kind() == io::ErrorKind::InvalidInput => {
-                            dout!("executable {:?} not an elf", this_bin);
-                        },
-                        Err(e) => {
-                            dout!("failed to obtain dependencies for elf {:?}: {:?}", this_bin, e);
-                        },
-                    }
-                }
-                // don't check for '#!' interpreters like Dracut, it's messy
-
+            Some(got) if got.md.file_type().is_symlink() => {
+                let symlink_tgt = fs::read_link(&got.path)?;
+                // FIXME this could loop endlessly; filter dups
+                // FIXME error
+                state.bins.names.push(symlink_tgt.into_os_string().into_string().unwrap());
                 cpio::archive_path(&mut cpio_state, &cpio_props, &got.path, &got.md, &mut cpio_writer)?;
+                println!("archived symlink: {:?}", got.path);
+            },
+            Some(got) if got.md.file_type().is_file() => {
+                gather_archive_file(&got.path, &got.md, Some(0o111), &mut state.libs.names, &mut libs_seen_filter, &mut cpio_state, &cpio_props, &mut cpio_writer)?;
                 println!("archived bin: {:?}", got.path);
+            },
+            Some(got) => {
+                cpio::archive_path(&mut cpio_state, &cpio_props, &got.path, &got.md, &mut cpio_writer)?;
+                println!("archived other: {:?}", got.path);
             },
             None => {
                 state.bins.missing.push(state.bins.off);
@@ -288,29 +309,20 @@ fn main() -> io::Result<()> {
     // process libs next, which may add to libs
     while let Some(this_lib) = state.libs.names.get(state.libs.off) {
         match path_stat(this_lib.clone(), &LIB_PATHS) {
-            Some(got) => {
-                if got.md.file_type().is_symlink() {
-                    let symlink_tgt = fs::read_link(&got.path).expect("TODO no target for symlink");
-                    // FIXME this could loop endlessly; filter dups
-                    // FIXME error
-                    state.libs.names.push(symlink_tgt.into_os_string().into_string().unwrap());
-                } else {
-                    let f = fs::OpenOptions::new().read(true).open(&got.path)?;
-                    match elf_deps(&f, &got.path, &mut libs_seen_filter) {
-                        Ok(mut d) => state.libs.names.append(&mut d),
-                        Err(ref e) if e.kind() == io::ErrorKind::InvalidInput => {
-                            dout!("{:?} not an elf", this_lib);
-                        },
-                        Err(e) => {
-                            dout!("failed to obtain dependencies for elf {:?}: {:?}", this_lib, e);
-                        },
-                    }
-                }
-
+            Some(got) if got.md.file_type().is_symlink() => {
+                let symlink_tgt = fs::read_link(&got.path).expect("TODO no target for symlink");
+                // FIXME this could loop endlessly; filter dups
+                // FIXME error
+                state.libs.names.push(symlink_tgt.into_os_string().into_string().unwrap());
                 cpio::archive_path(&mut cpio_state, &cpio_props, &got.path, &got.md, &mut cpio_writer)?;
+                println!("archived lib symlink: {:?}", got.path);
+            },
+            Some(got) if got.md.file_type().is_file() => {
+                gather_archive_file(&got.path, &got.md, None, &mut state.libs.names, &mut libs_seen_filter, &mut cpio_state, &cpio_props, &mut cpio_writer)?;
                 println!("archived lib: {:?}", got.path);
             },
-            None => {
+            Some(_) | None => {
+                // only support file/symlink library entries
                 state.libs.missing.push(state.libs.off);
             },
         };
