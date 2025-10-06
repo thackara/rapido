@@ -287,10 +287,15 @@ pub fn archive_path<W: Seek + Write>(
     let mut datalen: u32 = 0;
     let mut rmajor: u32 = 0;
     let mut rminor: u32 = 0;
-    let mut hardlink_ino: Option<u32> = None;
-    let mut hardlink_nlink: Option<u32> = None;
     let mut symlink_tgt = PathBuf::new();
-    let mut data_align_seek: u32 = 0;
+
+    let ftype = md.file_type();
+    if ftype.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "call archive_file for file archiving",
+        ));
+    }
 
     outpath = match outpath.strip_prefix("./") {
         Ok(p) => {
@@ -335,7 +340,6 @@ pub fn archive_path<W: Seek + Write>(
         }
     };
 
-    let ftype = md.file_type();
     if ftype.is_symlink() {
         symlink_tgt = fs::read_link(inpath)?;
         datalen = {
@@ -359,76 +363,14 @@ pub fn archive_path<W: Seek + Write>(
         rminor = (((rd >> 12) & 0xffffff00) | (rd & 0x000000ff)) as u32;
     }
 
-    if ftype.is_file() {
-        datalen = {
-            if md.len() > u64::from(u32::MAX) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "file too large for newc",
-                ));
-            }
-            md.len().try_into().unwrap()
-        };
-
-        if md.nlink() > 1 {
-            // follow GNU cpio's behaviour of attaching hardlink data only to
-            // the last entry in the archive.
-            let deferred = state.hardlink_seen(
-                &props,
-                &mut writer,
-                major,
-                minor,
-                md.clone(),
-                &inpath,
-                outpath,
-                &mut hardlink_ino,
-                &mut hardlink_nlink,
-            )?;
-            if deferred {
-                dout!("deferring hardlink {} data portion", outpath.display());
-                return Ok(());
-            }
-        }
-
-        if props.data_align > 0 && datalen > props.data_align {
-            // XXX we're "bending" the newc spec a bit here to inject zeros
-            // after fname to provide data segment alignment. These zeros are
-            // accounted for in the namesize, but some applications may only
-            // expect a single zero-terminator (and 4 byte alignment). GNU cpio
-            // and Linux initramfs handle this fine as long as PATH_MAX isn't
-            // exceeded.
-            data_align_seek = {
-                let len: u64 = archive_padlen(
-                    props.initial_data_off + state.off + NEWC_HDR_LEN + fname.len() as u64 + 1,
-                    u64::from(props.data_align),
-                );
-                let padded_namesize = len + fname.len() as u64 + 1;
-                if padded_namesize > u64::from(props.namesize_max) {
-                    dout!(
-                        "{} misaligned. Required padding {} exceeds namesize maximum {}.",
-                        outpath.display(),
-                        len,
-                        props.namesize_max
-                    );
-                    0
-                } else {
-                    len.try_into().unwrap()
-                }
-            };
-        }
-    }
-
     write!(
         writer,
         NEWC_HDR_FMT!(),
         magic = "070701",
-        ino = match hardlink_ino {
-            Some(i) => i,
-            None => {
-                let i = state.ino;
-                state.ino += 1;
-                i
-            }
+        ino = {
+            let i = state.ino;
+            state.ino += 1;
+            i
         },
         mode = md.mode(),
         uid = match props.fixed_uid {
@@ -439,17 +381,14 @@ pub fn archive_path<W: Seek + Write>(
             Some(g) => g,
             None => md.gid(),
         },
-        nlink = match hardlink_nlink {
-            Some(n) => n,
-            None => md.nlink().try_into().unwrap(),
-        },
+        nlink = md.nlink() as u32,
         mtime = mtime,
         filesize = datalen,
         major = major,
         minor = major,
         rmajor = rmajor,
         rminor = rminor,
-        namesize = fname.len() + 1 + data_align_seek as usize,
+        namesize = fname.len() + 1,
         chksum = 0
     )?;
     state.off += NEWC_HDR_LEN;
@@ -458,33 +397,17 @@ pub fn archive_path<W: Seek + Write>(
     state.off += fname.len() as u64;
 
     let mut seek_len: i64 = 1; // fname nulterm
-    if data_align_seek > 0 {
-        seek_len += data_align_seek as i64;
-        assert_eq!(archive_padlen(state.off + seek_len as u64, 4), 0);
-    } else {
-        let padding_len = archive_padlen(state.off + seek_len as u64, 4);
-        seek_len += padding_len as i64;
-    }
+    let padding_len = archive_padlen(state.off + seek_len as u64, 4);
+    seek_len += padding_len as i64;
     {
         let z = vec![0u8; seek_len.try_into().unwrap()];
         writer.write_all(&z)?;
     }
     state.off += seek_len as u64;
 
-    // io::copy() can reflink: https://github.com/rust-lang/rust/pull/75272 \o/
     if datalen > 0 {
-        if ftype.is_file() {
-            let mut reader = io::BufReader::new(fs::File::open(inpath)?);
-            let copied = io::copy(&mut reader, &mut writer)?;
-            if copied != u64::from(datalen) {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "copy returned unexpected length",
-                ));
-            }
-        } else if ftype.is_symlink() {
-            writer.write_all(symlink_tgt.as_os_str().as_bytes())?;
-        }
+        assert!(ftype.is_symlink());
+        writer.write_all(symlink_tgt.as_os_str().as_bytes())?;
         state.off += u64::from(datalen);
         let dpad_len: usize = archive_padlen(state.off, 4).try_into().unwrap();
         write!(writer, "{pad:.padlen$}", padlen = dpad_len, pad = "\0\0\0")?;
@@ -726,7 +649,8 @@ pub fn archive_flush_unseen_hardlinks<W: Write + Seek>(
         // .reverse() to match gnu ordering
         for p in deferred_inpaths.iter().rev() {
             let md = fs::symlink_metadata(p.as_path())?;
-            archive_path(state, props, p.as_path(), &md, &mut writer)?;
+            let f = fs::OpenOptions::new().read(true).open(p.as_path())?;
+            archive_file(state, props, p.as_path(), &md, &f, &mut writer)?;
         }
     }
 
