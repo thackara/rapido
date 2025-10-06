@@ -59,14 +59,19 @@ fn archive_loop<R: BufRead, W: Seek + Write>(
 
         let linestr = OsStr::from_bytes(linebuf.as_slice());
         let path = Path::new(linestr);
-        let md = match fs::symlink_metadata(path) {
-            Ok(m) => m,
+        match fs::symlink_metadata(path) {
+            Ok(m) if m.is_file() => {
+                let f = fs::OpenOptions::new().read(true).open(&path)?;
+                cpio::archive_file(&mut state, props, path, &m, &f, &mut writer)?;
+            },
+            Ok(m) => {
+                cpio::archive_path(&mut state, props, path, &m, &mut writer)?;
+            },
             Err(e) => {
                 println!("failed to get metadata for {}: {}", path.display(), e);
                 return Err(e);
             }
         };
-        cpio::archive_path(&mut state, props, path, &md, &mut writer)?;
     }
     cpio::archive_flush_unseen_hardlinks(&mut state, props, &mut writer)?;
     state.off = cpio::archive_trailer(&mut writer, state.off)?;
