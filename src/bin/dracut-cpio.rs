@@ -248,6 +248,8 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
+// tests change working directory, so need to be run with:
+// cargo test -- --test-threads=1 --nocapture
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,6 +400,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[test]
     fn test_archive_empty_file() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_file("file.txt", 0);
@@ -420,6 +423,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[test]
     fn test_archive_small_file() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_file("file.txt", 33);
@@ -441,6 +445,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[test]
     fn test_archive_prefixed_path() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_file("file.txt", 0);
@@ -462,6 +467,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[test]
     fn test_archive_absolute_path() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_file("file.txt", 0);
@@ -487,6 +493,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[test]
     fn test_archive_dir() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_dir("dir");
@@ -508,6 +515,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[test]
     fn test_archive_dir_file() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_dir("dir");
@@ -531,6 +539,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[test]
     fn test_archive_dot_path() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_dir("dir");
@@ -554,6 +563,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[test]
     fn test_archive_dot_slash_path() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_dir("dir");
@@ -577,6 +587,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[test]
     fn test_archive_symlink() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_file("file.txt", 0);
@@ -600,6 +611,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[test]
     fn test_archive_fifo() {
         let mut twd = TempWorkDir::new();
 
@@ -622,6 +634,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[test]
     fn test_archive_char() {
         let mut twd = TempWorkDir::new();
 
@@ -642,6 +655,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[test]
     fn test_archive_data_align() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_dir("dir");
@@ -701,6 +715,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[test]
     fn test_archive_data_align_off() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_dir("dir1");
@@ -746,6 +761,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[test]
     fn test_archive_data_align_off_bad() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_file("file.txt", 514 * 1024);
@@ -769,6 +785,7 @@ mod tests {
         assert_eq!(io::ErrorKind::InvalidInput, res.unwrap_err().kind());
     }
 
+    #[test]
     fn test_archive_hardlinks_order() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_file("file.txt", 512 * 4);
@@ -796,6 +813,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[test]
     fn test_archive_hardlinks_empty() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_file("file.txt", 0);
@@ -823,6 +841,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[test]
     fn test_archive_hardlinks_missing() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_file("file.txt", 512 * 4);
@@ -853,6 +872,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[test]
     fn test_archive_hardlinks_multi() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_file("file.txt", 512 * 4);
@@ -883,6 +903,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[test]
     fn test_archive_duplicates() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_file("file.txt", 512 * 4);
@@ -907,6 +928,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[test]
     fn test_archive_hardlink_duplicates() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_file("file.txt", 512 * 4);
@@ -935,6 +957,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[test]
     fn test_archive_list_separator() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_file("file1", 33);
@@ -989,6 +1012,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[test]
     fn test_archive_fixed_mtime() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_file("file1", 33);
@@ -1035,6 +1059,7 @@ mod tests {
         assert_eq!(md.mtime(), 0);
     }
 
+    #[test]
     fn test_archive_stat_mtime() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_file("file1", 33);
@@ -1076,6 +1101,7 @@ mod tests {
         assert_eq!(src_md.mtime(), ex_md.mtime());
     }
 
+    #[test]
     fn test_archive_fixed_owner() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_file("file1", 33);
@@ -1124,6 +1150,7 @@ mod tests {
         assert_eq!(md.gid(), 65534);
     }
 
+    #[test]
     fn test_archive_stat_owner() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_file("file1", 33);
@@ -1160,6 +1187,7 @@ mod tests {
         assert_eq!(src_md.gid(), ex_md.gid());
     }
 
+    #[test]
     fn test_archive_dev_maj_min() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_file("file1", 0);
@@ -1230,41 +1258,5 @@ mod tests {
                    s, gmd.rdev(), dmd.rdev());
             assert!(gmd.rdev() == dmd.rdev());
         }
-    }
-
-    #[test]
-    fn test_archive_all_single_threaded() {
-        // Each test_archive_ function changes its CWD and cargo test spawns
-        // multiple threads for concurrent testing by default, unless given
-        // --test-threads=1. Therefore, use a single wrapper test so that people
-        // don't get confused by multi-threaded "cargo test" failures.
-        // If someone finds a way make single-threaded the default for
-        // "cargo test" then we can drop this wrapper in future.
-        test_archive_empty_file();
-        test_archive_small_file();
-        test_archive_prefixed_path();
-        test_archive_absolute_path();
-        test_archive_dir();
-        test_archive_dir_file();
-        test_archive_dot_path();
-        test_archive_dot_slash_path();
-        test_archive_symlink();
-        test_archive_fifo();
-        test_archive_char();
-        test_archive_data_align();
-        test_archive_data_align_off();
-        test_archive_data_align_off_bad();
-        test_archive_hardlinks_order();
-        test_archive_hardlinks_empty();
-        test_archive_hardlinks_missing();
-        test_archive_hardlinks_multi();
-        test_archive_duplicates();
-        test_archive_hardlink_duplicates();
-        test_archive_list_separator();
-        test_archive_fixed_mtime();
-        test_archive_stat_mtime();
-        test_archive_fixed_owner();
-        test_archive_stat_owner();
-        test_archive_dev_maj_min();
     }
 }
