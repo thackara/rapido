@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: (GPL-2.0 OR GPL-3.0)
 // Copyright (C) 2025 SUSE LLC
 use std::collections::HashMap;
 use std::convert::TryInto;
