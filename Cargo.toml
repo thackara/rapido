@@ -2,9 +2,9 @@
 name = "rapido"
 description = "Quickly test Linux kernel changes"
 authors = ["David Disseldorp"]
-# GPL-2.0 covers rust source under the src directory, excluding third_party,
-# as marked via SPDX-License-Identifier file headers.
-license = "GPL-2.0"
+# The following license covers the src directory, excluding third_party.
+# SPDX-License-Identifier headers are attached to individual source files.
+license = "(GPL-2.0 OR GPL-3.0)"
 version = "0.1.0"
 edition = "2018"
 default-run = "rapido-cut"

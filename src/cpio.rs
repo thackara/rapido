@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: (GPL-2.0 OR GPL-3.0)
 // Copyright (C) 2021 SUSE LLC
 
 use std::convert::TryInto;
