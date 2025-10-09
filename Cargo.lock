@@ -11,9 +11,14 @@ name = "elf"
 version = "0.8.0"
 
 [[package]]
+name = "kv-conf"
+version = "0.1.0"
+
+[[package]]
 name = "rapido"
 version = "0.1.0"
 dependencies = [
  "crosvm",
  "elf",
+ "kv-conf",
 ]
