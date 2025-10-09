@@ -1302,9 +1302,14 @@ mod tests {
         let f = fs::File::create("dracut.cpio").unwrap();
         let mut writer = io::BufWriter::new(f);
         let mut reader = io::BufReader::new(file_list.as_bytes());
-        let wrote = archive_loop(&mut reader, &mut writer, &ArchiveProperties::default()).unwrap();
+        let wrote = archive_loop(
+            &mut reader,
+            &mut writer,
+            &cpio::ArchiveProperties::default()
+        )
+        .unwrap();
         twd.cleanup_files.push(PathBuf::from("dracut.cpio"));
-        assert!(wrote > NEWC_HDR_LEN);
+        assert!(wrote > cpio::NEWC_HDR_LEN);
 
         let status = Command::new("diff")
             .args(&["gnu.cpio", "dracut.cpio"])
