@@ -16,8 +16,11 @@ path = "src/cpio.rs"
 # non-lib source for binaries is carried under src/bin/
 
 [dependencies]
+# internal
+kv-conf = { path = "src/kv-conf" }
+
 # minimal command line parameter passing
 crosvm = { path = "src/third_party/crosvm" }
 # Parse ELF to determine library dependencies. "std" provides file seek API.
 elf = { default-features = false, features = ["std"], path = "src/third_party/rust-elf" }
-# please avoid adding any more dependencies
+# please avoid adding any more external dependencies
