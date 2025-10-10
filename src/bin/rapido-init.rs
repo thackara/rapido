@@ -9,6 +9,39 @@ use std::str;
 // we expect it in root on VMs
 const RAPIDO_CONF: &str = "/rapido.conf";
 
+fn init_mount(do_debugfs: bool) -> io::Result<()> {
+    let mounts = [
+        ["-t", "proc", "proc", "/proc"],
+        ["-t", "sysfs", "sysfs", "/sys"],
+    ];
+    // sys_fsmount in the future, when we can do it without dependency bloat?
+    for mount_args in mounts {
+        fs::create_dir_all(mount_args[3])?;
+        let status = Command::new("mount")
+            .args(&mount_args)
+            .status()
+            .expect("failed to execute mount command");
+        if !status.success() {
+            println!("mount failed");
+            return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+        }
+    }
+
+    if !do_debugfs {
+        return Ok(());
+    }
+
+    let status = Command::new("mount")
+        .args(&["-t", "debugfs", "debugfs", "/sys/kernel/debug/"])
+        .status()
+        .expect("failed to execute mount command");
+    if !status.success() {
+        println!("debugfs mount failed - ignoring");
+    }
+
+    Ok(())
+}
+
 #[derive(PartialEq)]
 #[derive(Debug)]
 struct KcliArgs<'a> {
@@ -94,7 +127,7 @@ fn kcli_parse(kcmdline: &[u8]) -> io::Result<KcliArgs> {
     Ok(args)
 }
 
-fn kmods_load(conf: &HashMap<String, String>) -> io::Result<()> {
+fn kmods_load(conf: &HashMap<String, String>, has_net: bool) -> io::Result<()> {
     let mut modprobe_args: Vec<&str> = vec!("-a");
 
     match conf.get("QEMU_EXTRA_ARGS") {
@@ -110,6 +143,10 @@ fn kmods_load(conf: &HashMap<String, String>) -> io::Result<()> {
         modprobe_args.extend(&["9pnet", "9pnet_virtio", "9p"]);
     }
 
+    if has_net {
+	modprobe_args.extend(&["virtio_net", "af_packet"]);
+    }
+
     if modprobe_args.len() > 1 {
         let status = Command::new("modprobe")
             .args(&modprobe_args)
@@ -122,6 +159,30 @@ fn kmods_load(conf: &HashMap<String, String>) -> io::Result<()> {
     }
 
     Ok(())
+}
+
+fn init_hostname(kcli_args: KcliArgs) -> io::Result<String> {
+    let hostname: String = match kcli_args.rapido_hostname {
+        None => {
+            let mut h = String::from("rapido");
+            h.push_str(kcli_args.rapido_vm_num.unwrap());
+            h
+        },
+        Some(hd) => {
+            match hd.split_once('.') {
+                Some((h, d)) => {
+                    fs::write("/proc/sys/kernel/domainname", d)?;
+                    h.to_string()
+                },
+                None => hd.to_string(),
+            }
+        },
+    };
+
+    fs::write("/proc/sys/kernel/hostname", &hostname)?;
+    // don't set_env(HOSTNAME), pass it to new processes via Command::env
+
+    Ok(hostname)
 }
 
 fn main() -> io::Result<()> {
@@ -140,7 +201,16 @@ fn main() -> io::Result<()> {
             return Err(e);
         },
     };
-    kmods_load(&conf)?;
+
+    let has_net = match fs::symlink_metadata("/rapido-rsc/net") {
+        Err(_) => false,
+        Ok(md) => md.is_dir(),
+    };
+    let has_dyn_debug = conf.contains_key("DYN_DEBUG_MODULES") || conf.contains_key("DYN_DEBUG_FILES");
+
+    kmods_load(&conf, has_net)?;
+
+    init_mount(has_dyn_debug)?;
 
     let kcmdline = fs::read("/proc/cmdline")?;
     let kcli_args = kcli_parse(&kcmdline)?;
@@ -149,6 +219,8 @@ fn main() -> io::Result<()> {
         println!("/proc/cmdline missing rapido.vm_num");
         return Err(io::Error::from(io::ErrorKind::InvalidInput));
     }
+
+    let hostname = init_hostname(kcli_args)?;
 
     Ok(())
 }
