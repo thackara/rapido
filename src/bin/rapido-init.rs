@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: (GPL-2.0 OR GPL-3.0)
 // Copyright (C) 2025 SUSE LLC
 use std::io;
+use std::ffi::OsStr;
 use std::fs;
 use std::collections::HashMap;
+use std::os::unix;
 use std::process::Command;
 use std::str;
 
@@ -185,6 +187,107 @@ fn init_hostname(kcli_args: KcliArgs) -> io::Result<String> {
     Ok(hostname)
 }
 
+fn init_network(conf: &HashMap<String, String>, kcli_args: KcliArgs) -> io::Result<()> {
+    // TODO: add dirs to cpio
+    fs::create_dir_all("/run/systemd/")?;
+    fs::create_dir_all("/etc/systemd/")?;
+
+    let mut vm_netdir = String::from("/rapido-rsc/net/vm");
+    vm_netdir.push_str(kcli_args.rapido_vm_num.unwrap());
+    unix::fs::symlink(&vm_netdir, "/etc/systemd/network")?;
+
+    let tap_mac_map = match kcli_args.rapido_tap_mac {
+        None => 
+
+        // TODO don't use readdir, just walk map keys and access path
+    for entry in fs::read_dir(vm_netdir)? {
+	let entry = entry?;
+        if entry.path().extension() != Some(OsStr::new("network")) {
+            continue;
+        }
+        let kcli_mac_for_net_conf = match entry.path().file_stem() {
+            None => continue,
+            Some(s) if s.to_str().is_some() => {
+                kcli_args.rapido_tap_mac.get(s.to_str().unwrap())
+            },
+            Some(_) => continue,
+        };
+        if kcli_mac_for_net_conf.is_none() {
+            continue;
+        }
+
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .append(true)
+            .open(entry)?;
+        fs::write(f, "[Match]\nMACAddress={}", kcli_mac_for_net_conf.unwrap())?;
+    }
+
+    let mut f = fs::OpenOptions::new()
+        .write(true)
+        .append(true)
+        .create(true)
+        .open("/etc/systemd/network/lo.network")?;
+    fs::write(f, "[Match]\nName=lo")?;
+
+    match kcli_args.systemd_machine_id {
+        None => {
+            eprintln!("systemd.machine_id missing from kcli");
+            Err(io::Error::from(io::ErrorKind::InvalidInput))
+        },
+        Some(mid) => fs::write("/etc/machine-id", mid),
+    }?;
+
+    let status = Command::new("/usr/lib/systemd/systemd-udevd")
+        .args(&["--daemon"])
+        .status()
+        .expect("failed to execute systemd-udevd"); // TODO retry with PATH
+    if !status.success() {
+        eprintln!("systemd-udevd failed to start");
+        return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+    }
+
+    let status = Command::new("udevadm")
+        .args(&["trigger", "/sys/class/net/*"])
+        .status()
+        .expect("failed to execute udevadm");
+    if !status.success() {
+        eprintln!("udevadm failed");
+        return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+    }
+
+    let mut f = fs::OpenOptions::new()
+        .write(true)
+        .append(true)
+        .create(true)
+        .open("/etc/passwd")?;
+    writeln!(
+        f,
+        "systemd-network:x:482:482:systemd Network Management:/:/sbin/nologin"
+    )?;
+
+    let status = Command::new("setsid")
+        .args(&["--fork", "/usr/lib/systemd/systemd-networkd"])
+        .status() // TODO retry with PATH
+        .expect("failed to execute systemd-networkd via setsid");
+    if !status.success() {
+        eprintln!("systemd-networkd failed to start");
+        return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+    }
+
+    println!("Waiting for network to come online...");
+    let status = Command::new("systemd-networkd-wait-online")
+        .args(&["--timeout=20"])
+        .status()
+        .expect("failed to execute systemd-networkd-wait-online");
+    if !status.success() {
+        eprintln!("systemd-networkd-wait-online failed to start");
+        return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+    }
+
+    Ok(())
+}
+
 fn main() -> io::Result<()> {
     let f = match fs::File::open(RAPIDO_CONF) {
         Ok(f) => f,
@@ -221,6 +324,10 @@ fn main() -> io::Result<()> {
     }
 
     let hostname = init_hostname(kcli_args)?;
+
+    if has_net {
+        init_network(&conf, &kcli_args)?;
+    }
 
     Ok(())
 }
