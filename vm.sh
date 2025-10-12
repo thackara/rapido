@@ -33,7 +33,7 @@ _vm_start() {
 
 	# XXX could use systemd.hostname=, but it requires systemd-hostnamed
 	n=$(head -n1 "${net_conf}/hostname" 2>/dev/null) \
-		&& kcmdline+=("rapido.hostname=\"${n}\"")
+		&& kcmdline+=("rapido.hostname=${n}")
 
 	_rt_qemu_resources_get "${DRACUT_OUT}" vm_resources netd_flag \
 		|| _fail "failed to get qemu resource parameters"
