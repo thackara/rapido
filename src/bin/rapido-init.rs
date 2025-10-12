@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: (GPL-2.0 OR GPL-3.0)
 // Copyright (C) 2025 SUSE LLC
-use std::io;
-use std::ffi::OsStr;
+use std::io::{self, Write};
+use std::ffi::OsString;
 use std::fs;
 use std::collections::HashMap;
 use std::os::unix;
@@ -11,14 +11,18 @@ use std::str;
 // we expect it in root on VMs
 const RAPIDO_CONF: &str = "/rapido.conf";
 
-fn init_mount(do_debugfs: bool) -> io::Result<()> {
+fn init_mount(do_debugfs: bool, do_virtfs: bool) -> io::Result<()> {
     let mounts = [
-        ["-t", "proc", "proc", "/proc"],
-        ["-t", "sysfs", "sysfs", "/sys"],
+        ["-t", "proc", "-o", "nosuid,noexec,nodev", "proc", "/proc"],
+        ["-t", "sysfs", "-o", "nosuid,noexec,nodev", "sysfs", "/sys"],
+        ["-t", "devtmpfs", "-o", "nosuid,noexec", "devtmpfs", "/dev"],
+        ["-t", "devpts", "-o", "nosuid,noexec", "devpts", "/dev/pts"], // needed?
+        ["-t", "tmpfs", "-o", "mode=1777,noexec,nosuid,nodev", "tmpfs", "/dev/shm"], // needed?
+        ["-t", "tmpfs", "-o", "mode=755,noexec,nosuid,nodev", "tmpfs", "/run"],
     ];
     // sys_fsmount in the future, when we can do it without dependency bloat?
     for mount_args in mounts {
-        fs::create_dir_all(mount_args[3])?;
+        fs::create_dir_all(mount_args.last().unwrap())?;
         let status = Command::new("mount")
             .args(&mount_args)
             .status()
@@ -29,16 +33,25 @@ fn init_mount(do_debugfs: bool) -> io::Result<()> {
         }
     }
 
-    if !do_debugfs {
-        return Ok(());
+    if do_debugfs {
+        let status = Command::new("mount")
+            .args(&["-t", "debugfs", "debugfs", "/sys/kernel/debug/"])
+            .status()
+            .expect("failed to execute mount command");
+        if !status.success() {
+            println!("debugfs mount failed - ignoring");
+        }
     }
 
-    let status = Command::new("mount")
-        .args(&["-t", "debugfs", "debugfs", "/sys/kernel/debug/"])
-        .status()
-        .expect("failed to execute mount command");
-    if !status.success() {
-        println!("debugfs mount failed - ignoring");
+    if do_virtfs {
+        fs::create_dir_all("/host")?;
+        let status = Command::new("mount")
+            .args(&["-t", "9p", "host0", "/host"])
+            .status()
+            .expect("failed to execute mount command");
+        if !status.success() {
+            println!("9p mount failed - ignoring");
+        }
     }
 
     Ok(())
@@ -51,6 +64,7 @@ struct KcliArgs<'a> {
     rapido_vm_num: Option<&'a str>,
     rapido_tap_mac: Option<HashMap<&'a str, &'a str>>,
     systemd_machine_id: Option<&'a str>,
+    console: Option<&'a str>,
 }
 
 fn kcli_parse(kcmdline: &[u8]) -> io::Result<KcliArgs> {
@@ -59,6 +73,7 @@ fn kcli_parse(kcmdline: &[u8]) -> io::Result<KcliArgs> {
         rapido_vm_num: None,
         rapido_tap_mac: None,
         systemd_machine_id: None,
+        console: None,
     };
 
     // We know exactly what we're looking for, so don't bother with flexible
@@ -122,6 +137,15 @@ fn kcli_parse(kcmdline: &[u8]) -> io::Result<KcliArgs> {
                     Ok(s) => Some(s),
                 };
             },
+            // console
+            [b'c', b'o', b'n', b's', b'o', b'l', b'e', b'=', val @ ..] => {
+                args.console = match str::from_utf8(val) {
+                    Err(_) => {
+                        return Err(io::Error::from(io::ErrorKind::InvalidData));
+                    },
+                    Ok(s) => Some(s),
+                };
+            },
             [ _unused @ .. ] => {},
         };
     }
@@ -151,9 +175,10 @@ fn kmods_load(conf: &HashMap<String, String>, has_net: bool) -> io::Result<()> {
 
     if modprobe_args.len() > 1 {
         let status = Command::new("modprobe")
+            .env("PATH", "/usr/sbin:/usr/bin")
             .args(&modprobe_args)
             .status()
-            .expect("failed to execute process");
+            .expect("failed to execute modprobe process");
         if !status.success() {
             println!("modprobe failed");
             return Err(io::Error::from(io::ErrorKind::BrokenPipe));
@@ -163,7 +188,7 @@ fn kmods_load(conf: &HashMap<String, String>, has_net: bool) -> io::Result<()> {
     Ok(())
 }
 
-fn init_hostname(kcli_args: KcliArgs) -> io::Result<String> {
+fn init_hostname(kcli_args: &KcliArgs) -> io::Result<String> {
     let hostname: String = match kcli_args.rapido_hostname {
         None => {
             let mut h = String::from("rapido");
@@ -187,7 +212,7 @@ fn init_hostname(kcli_args: KcliArgs) -> io::Result<String> {
     Ok(hostname)
 }
 
-fn init_network(conf: &HashMap<String, String>, kcli_args: KcliArgs) -> io::Result<()> {
+fn init_network(kcli_args: &KcliArgs) -> io::Result<()> {
     // TODO: add dirs to cpio
     fs::create_dir_all("/run/systemd/")?;
     fs::create_dir_all("/etc/systemd/")?;
@@ -196,31 +221,20 @@ fn init_network(conf: &HashMap<String, String>, kcli_args: KcliArgs) -> io::Resu
     vm_netdir.push_str(kcli_args.rapido_vm_num.unwrap());
     unix::fs::symlink(&vm_netdir, "/etc/systemd/network")?;
 
-    let tap_mac_map = match kcli_args.rapido_tap_mac {
-        None => 
+    match &kcli_args.rapido_tap_mac {
+        Some(map) => for (tap, mac) in map {
+            let mut f = match fs::OpenOptions::new()
+                .write(true)
+                .append(true)
+                .create(false)
+                .open(format!("{}/{}.network", vm_netdir, tap)) {
+                    Err(_) => continue,
+                    Ok(f) => f,
+            };
 
-        // TODO don't use readdir, just walk map keys and access path
-    for entry in fs::read_dir(vm_netdir)? {
-	let entry = entry?;
-        if entry.path().extension() != Some(OsStr::new("network")) {
-            continue;
-        }
-        let kcli_mac_for_net_conf = match entry.path().file_stem() {
-            None => continue,
-            Some(s) if s.to_str().is_some() => {
-                kcli_args.rapido_tap_mac.get(s.to_str().unwrap())
-            },
-            Some(_) => continue,
-        };
-        if kcli_mac_for_net_conf.is_none() {
-            continue;
-        }
-
-        let mut f = fs::OpenOptions::new()
-            .write(true)
-            .append(true)
-            .open(entry)?;
-        fs::write(f, "[Match]\nMACAddress={}", kcli_mac_for_net_conf.unwrap())?;
+            write!(f, "\n[Match]\nMACAddress={}", mac)?;
+        },
+        None => {},
     }
 
     let mut f = fs::OpenOptions::new()
@@ -228,7 +242,7 @@ fn init_network(conf: &HashMap<String, String>, kcli_args: KcliArgs) -> io::Resu
         .append(true)
         .create(true)
         .open("/etc/systemd/network/lo.network")?;
-    fs::write(f, "[Match]\nName=lo")?;
+    write!(f, "[Match]\nName=lo")?;
 
     match kcli_args.systemd_machine_id {
         None => {
@@ -241,14 +255,22 @@ fn init_network(conf: &HashMap<String, String>, kcli_args: KcliArgs) -> io::Resu
     let status = Command::new("/usr/lib/systemd/systemd-udevd")
         .args(&["--daemon"])
         .status()
-        .expect("failed to execute systemd-udevd"); // TODO retry with PATH
+        .expect("failed to execute systemd-udevd");
     if !status.success() {
         eprintln!("systemd-udevd failed to start");
         return Err(io::Error::from(io::ErrorKind::BrokenPipe));
     }
 
+
+    let mut entries = fs::read_dir("/sys/class/net/")?
+        .map(|res| res.map(|e| e.path().into_os_string()))
+        .collect::<Result<Vec<_>, io::Error>>()?;
+
+    let mut udevadm_args = vec!(OsString::from("trigger"));
+    udevadm_args.append(&mut entries);
+    eprintln!("running udevadm {:?}", udevadm_args);
     let status = Command::new("udevadm")
-        .args(&["trigger", "/sys/class/net/*"])
+        .args(udevadm_args)
         .status()
         .expect("failed to execute udevadm");
     if !status.success() {
@@ -261,14 +283,14 @@ fn init_network(conf: &HashMap<String, String>, kcli_args: KcliArgs) -> io::Resu
         .append(true)
         .create(true)
         .open("/etc/passwd")?;
-    writeln!(
+    write!(
         f,
-        "systemd-network:x:482:482:systemd Network Management:/:/sbin/nologin"
+        "systemd-network:x:482:482:systemd Network Management:/:/sbin/nologin\n"
     )?;
 
     let status = Command::new("setsid")
         .args(&["--fork", "/usr/lib/systemd/systemd-networkd"])
-        .status() // TODO retry with PATH
+        .status()
         .expect("failed to execute systemd-networkd via setsid");
     if !status.success() {
         eprintln!("systemd-networkd failed to start");
@@ -276,7 +298,7 @@ fn init_network(conf: &HashMap<String, String>, kcli_args: KcliArgs) -> io::Resu
     }
 
     println!("Waiting for network to come online...");
-    let status = Command::new("systemd-networkd-wait-online")
+    let status = Command::new("/usr/lib/systemd/systemd-networkd-wait-online")
         .args(&["--timeout=20"])
         .status()
         .expect("failed to execute systemd-networkd-wait-online");
@@ -288,7 +310,38 @@ fn init_network(conf: &HashMap<String, String>, kcli_args: KcliArgs) -> io::Resu
     Ok(())
 }
 
-fn main() -> io::Result<()> {
+fn init_shell(hostname: String) -> io::Result<()> {
+    let mut spawned = Command::new("setsid")
+        .args(&["--ctty", "--", "/bin/bash", "--rcfile", "/rapido.rc", "-i"])
+        .envs([
+            // RAPIDO_INIT indicates this (non-Dracut) init to vm_autorun, etc.
+            ("RAPIDO_INIT", "0.1"),
+            ("PATH", "/usr/bin:/usr/sbin:."),
+            ("TERM", "linux"),
+            ("PS1", format!("{}:${{PWD}}# ", hostname).as_str())
+        ])
+        .spawn()
+        .expect("failed to execute bash via setsid");
+    match spawned.wait() {
+        Err(e) => {
+            eprintln!("bash error {:?}", e);
+            return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+        },
+        Ok(status) => eprintln!("bash ended with status {}", status),
+    }
+    Ok(())
+}
+
+fn init_shutdown() -> io::Result<()> {
+    fs::write("/proc/sys/kernel/sysrq", "1\n")?;
+    fs::write("/proc/sysrq-trigger", "o\n")?;
+    std::thread::sleep(std::time::Duration::from_secs(20));
+    Ok(())
+}
+
+fn init_main() -> io::Result<()> {
+    eprintln!("Starting rapido-init...");
+
     let f = match fs::File::open(RAPIDO_CONF) {
         Ok(f) => f,
         Err(e) => {
@@ -310,10 +363,11 @@ fn main() -> io::Result<()> {
         Ok(md) => md.is_dir(),
     };
     let has_dyn_debug = conf.contains_key("DYN_DEBUG_MODULES") || conf.contains_key("DYN_DEBUG_FILES");
+    let has_virtfs = conf.contains_key("VIRTFS_SHARE_PATH");
 
     kmods_load(&conf, has_net)?;
 
-    init_mount(has_dyn_debug)?;
+    init_mount(has_dyn_debug, has_virtfs)?;
 
     let kcmdline = fs::read("/proc/cmdline")?;
     let kcli_args = kcli_parse(&kcmdline)?;
@@ -323,13 +377,28 @@ fn main() -> io::Result<()> {
         return Err(io::Error::from(io::ErrorKind::InvalidInput));
     }
 
-    let hostname = init_hostname(kcli_args)?;
+    let hostname = init_hostname(&kcli_args)?;
 
     if has_net {
-        init_network(&conf, &kcli_args)?;
+        init_network(&kcli_args)?;
     }
 
+    init_shell(hostname)?;
+
     Ok(())
+}
+
+fn main() -> io::Result<()> {
+    match init_main() {
+        Err(e) => {
+            eprintln!("init failed: {:?}", e);
+        },
+        Ok(_) => {
+            eprintln!("rapido-init completed, shutting down...");
+        },
+    }
+
+    init_shutdown()
 }
 
 #[cfg(test)]
@@ -346,10 +415,11 @@ mod tests {
                 rapido_hostname: None,
                 rapido_tap_mac: None,
                 systemd_machine_id: None,
+                console: None,
             }
         );
 
-        let kcli = b"rapido.vm_num=3  rapido.hostname=rapido1 rapido.vm_num=4";
+        let kcli = b"rapido.vm_num=3  rapido.hostname=rapido1 rapido.vm_num=4 console=ttyS0";
         assert_eq!(
             kcli_parse(kcli).expect("kcli_parse failed"),
             KcliArgs {
@@ -357,6 +427,7 @@ mod tests {
                 rapido_hostname: Some("rapido1"),
                 rapido_tap_mac: None,
                 systemd_machine_id: None,
+                console: Some("ttyS0"),
             }
         );
 
@@ -371,7 +442,22 @@ mod tests {
                         ("tap2", "b8:ac:24:45:c5:02"),
                 ])),
                 systemd_machine_id: None,
+                console: None,
             }
         );
+    }
+
+    #[test]
+    fn test_rapido_conf() {
+        let f = match fs::File::open("./rapido.conf") {
+            Ok(f) => f,
+            Err(e) => {
+                println!("failed to open {}: {}. skipping test",
+                    "./rapido.conf", e);
+                return;
+            },
+        };
+        let mut reader = io::BufReader::new(f);
+        let conf = kv_conf::kv_conf_process(&mut reader).expect("failed to pass conf");
     }
 }
