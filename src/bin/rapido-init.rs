@@ -311,6 +311,8 @@ fn init_network(kcli_args: &KcliArgs) -> io::Result<()> {
 }
 
 fn init_shell(hostname: String) -> io::Result<()> {
+    // rapido.rc starts subsequent autorun scripts
+    // TODO future: allow for starting binary autorun payloads instead
     let mut spawned = Command::new("setsid")
         .args(&["--ctty", "--", "/bin/bash", "--rcfile", "/rapido.rc", "-i"])
         .envs([
@@ -318,6 +320,7 @@ fn init_shell(hostname: String) -> io::Result<()> {
             ("RAPIDO_INIT", "0.1"),
             ("PATH", "/usr/bin:/usr/sbin:."),
             ("TERM", "linux"),
+            ("HOSTNAME", &hostname),
             ("PS1", format!("{}:${{PWD}}# ", hostname).as_str())
         ])
         .spawn()
