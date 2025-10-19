@@ -179,10 +179,10 @@ fn kv_process(line: &str, map: &mut HashMap<String, String>) -> io::Result<Optio
 // Example:
 // fn main() {
 //     let f = File::open("rapido.conf").expect("failed to open conf file");
-//     let _kv_map = kv_conf_process(io::BufReader::new(f));
+//     let mut map: HashMap<String, String> = HashMap::new();
+//     let _res = kv_conf_process_append(io::BufReader::new(f), &mut map);
 // }
-pub fn kv_conf_process<R: io::BufRead>(mut rdr: R) -> io::Result<HashMap<String, String>> {
-    let mut map: HashMap<String, String> = HashMap::new();
+pub fn kv_conf_process_append<R: io::BufRead>(mut rdr: R, map: &mut HashMap<String, String>) -> io::Result<()> {
     let mut buffer = String::new();
 
     for linenum in 1.. {
@@ -199,7 +199,7 @@ pub fn kv_conf_process<R: io::BufRead>(mut rdr: R) -> io::Result<HashMap<String,
             Ok(_) => {},
         };
 
-        match kv_process(&mut buffer, &mut map) {
+        match kv_process(&mut buffer, map) {
             Err(e) => {
                 let msg = if e.get_ref().is_some() {
                     format!("line {}: {:?}", linenum, e.get_ref())
@@ -213,6 +213,18 @@ pub fn kv_conf_process<R: io::BufRead>(mut rdr: R) -> io::Result<HashMap<String,
             Ok(_) => buffer.clear(),
         };
     }
+    Ok(())
+}
+
+// Example:
+// fn main() {
+//     let f = File::open("rapido.conf").expect("failed to open conf file");
+//     let _kv_map = kv_conf_process(io::BufReader::new(f));
+// }
+pub fn kv_conf_process<R: io::BufRead>(rdr: R) -> io::Result<HashMap<String, String>> {
+    let mut map: HashMap<String, String> = HashMap::new();
+
+    kv_conf_process_append(rdr, &mut map)?;
 
     Ok(map)
 }
@@ -431,5 +443,24 @@ mod tests {
         vec.resize(CONF_LINE_MAX + 1, b'#');
         let c = io::Cursor::new(&vec);
         assert!(kv_conf_process(c).is_err());
+    }
+
+    #[test]
+    fn test_append() {
+        let c = io::Cursor::new("key=");
+        let mut map = kv_conf_process(c).expect("kv_conf_process failed");
+        assert_eq!(map,
+            HashMap::from([ ("key".to_string(), "".to_string()) ]));
+
+        map.insert("extra".to_string(), "val".to_string());
+        let c = io::Cursor::new("key=overwritten\nnextkey=stuff${extra}");
+        kv_conf_process_append(c, &mut map).expect("kv_conf_process_append failed");
+        assert_eq!(map,
+            HashMap::from([
+                ("key".to_string(), "overwritten".to_string()),
+                ("extra".to_string(), "val".to_string()),
+                ("nextkey".to_string(), "stuffval".to_string()),
+            ])
+        );
     }
 }
