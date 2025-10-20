@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 
 use crosvm::argument::{self, Argument};
 
+const LIST_SEPARATOR: u8 = b'\n';
+
 fn archive_loop<R: BufRead, W: Seek + Write>(
     mut reader: R,
     mut writer: W,
@@ -28,7 +30,7 @@ fn archive_loop<R: BufRead, W: Seek + Write>(
     loop {
         let mut linebuf: Vec<u8> = Vec::new();
         let mut r = reader.by_ref().take(cpio::PATH_MAX);
-        match r.read_until(props.list_separator, &mut linebuf) {
+        match r.read_until(LIST_SEPARATOR, &mut linebuf) {
             Ok(l) => {
                 if l == 0 {
                     break; // EOF
@@ -45,7 +47,7 @@ fn archive_loop<R: BufRead, W: Seek + Write>(
 
         // trim separator. len > 0 already checked.
         let last_byte = linebuf.last().unwrap();
-        if *last_byte == props.list_separator {
+        if *last_byte == LIST_SEPARATOR {
             linebuf.pop().unwrap();
             if linebuf.len() == 0 {
                 continue;
@@ -53,7 +55,7 @@ fn archive_loop<R: BufRead, W: Seek + Write>(
         } else {
             println!(
                 "\'{:0x}\' ending not separator \'{:0x}\' terminated",
-                last_byte, props.list_separator
+                last_byte, LIST_SEPARATOR
             );
         }
 
@@ -158,7 +160,6 @@ fn params_process(
                 }
                 props.data_align = v;
             }
-            "null" => props.list_separator = b'\0',
             "mtime" => {
                 let v: u32 = value
                     .unwrap()
@@ -886,61 +887,6 @@ mod tests {
         let wrote = archive_loop(&mut reader, &mut writer, &cpio::ArchiveProperties::default()).unwrap();
         twd.cleanup_files.push(PathBuf::from("dracut.cpio"));
         assert!(wrote > cpio::NEWC_HDR_LEN * 4 + 512 * 12);
-
-        let status = Command::new("diff")
-            .args(&["gnu.cpio", "dracut.cpio"])
-            .status()
-            .expect("diff failed to start");
-        assert!(status.success());
-    }
-
-    #[test]
-    fn test_archive_list_separator() {
-        let mut twd = TempWorkDir::new();
-        twd.create_tmp_file("file1", 33);
-        twd.create_tmp_file("file2", 55);
-        let file_list_nulldelim: &str = "file1\0file2\0";
-
-        let mut proc = Command::new("cpio")
-            .args(&[
-                "--quiet",
-                "-o",
-                "-H",
-                "newc",
-                "--ignore-devno",
-                "--renumber-inodes",
-                "-F",
-                "gnu.cpio",
-                "--null",
-            ])
-            .stdin(Stdio::piped())
-            .spawn()
-            .expect("GNU cpio failed to start");
-        {
-            let mut stdin = proc.stdin.take().unwrap();
-            stdin
-                .write_all(file_list_nulldelim.as_bytes())
-                .expect("Failed to write to stdin");
-        }
-
-        let status = proc.wait().unwrap();
-        assert!(status.success());
-        twd.cleanup_files.push(PathBuf::from("gnu.cpio"));
-
-        let f = fs::File::create("dracut.cpio").unwrap();
-        let mut writer = io::BufWriter::new(f);
-        let mut reader = io::BufReader::new(file_list_nulldelim.as_bytes());
-        let wrote = archive_loop(
-            &mut reader,
-            &mut writer,
-            &cpio::ArchiveProperties {
-                list_separator: b'\0',
-                ..cpio::ArchiveProperties::default()
-            },
-        )
-        .unwrap();
-        twd.cleanup_files.push(PathBuf::from("dracut.cpio"));
-        assert!(wrote > cpio::NEWC_HDR_LEN * 3 + 33 + 55);
 
         let status = Command::new("diff")
             .args(&["gnu.cpio", "dracut.cpio"])

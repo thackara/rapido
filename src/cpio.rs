@@ -46,8 +46,6 @@ pub struct ArchiveProperties {
     // if the archive is being appended to the end of an existing file, then
     // @initial_data_off is used when calculating @data_align alignment.
     pub initial_data_off: u64,
-    // delimiter character for the stdin file list
-    pub list_separator: u8,
     // mtime, uid and gid to use for archived inodes, instead of the value
     // reported by stat.
     pub fixed_mtime: Option<u32>,
@@ -62,7 +60,6 @@ impl ArchiveProperties {
             data_align: 0,
             namesize_max: PATH_MAX as u32,
             initial_data_off: 0,
-            list_separator: b'\n',
             fixed_mtime: None,
             fixed_uid: None,
             fixed_gid: None,
