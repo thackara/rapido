@@ -77,18 +77,18 @@ fn archive_loop<R: BufRead, W: Seek + Write>(
             }
         };
     }
-    state.off = cpio::archive_trailer(&mut writer, state.off)?;
+    let mut final_off = cpio::archive_trailer(&mut state, &mut writer)?;
 
     // GNU cpio pads the end of an archive out to blocklen with zeros
-    let block_padlen = cpio::archive_padlen(state.off, 512);
+    let block_padlen = cpio::archive_padlen(final_off, 512);
     if block_padlen > 0 {
         let z = vec![0u8; block_padlen.try_into().unwrap()];
         writer.write_all(&z)?;
-        state.off += block_padlen;
+        final_off += block_padlen;
     }
     writer.flush()?;
 
-    Ok(state.off)
+    Ok(final_off)
 }
 
 fn params_usage(params: &[Argument]) {
