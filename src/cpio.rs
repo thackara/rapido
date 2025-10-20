@@ -53,12 +53,6 @@ pub struct ArchiveProperties {
     pub fixed_mtime: Option<u32>,
     pub fixed_uid: Option<u32>,
     pub fixed_gid: Option<u32>,
-    // If OUTPUT file exists, then zero-truncate it instead of appending. The
-    // default append behaviour chains archives back-to-back, i.e. multiple
-    // archives will be separated by a TRAILER and 512-byte padding.
-    // See Linux's Documentation/driver-api/early-userspace/buffer-format.rst
-    // for details on how chained initramfs archives are handled.
-    pub truncate_existing: bool,
 }
 
 impl ArchiveProperties {
@@ -72,7 +66,6 @@ impl ArchiveProperties {
             fixed_mtime: None,
             fixed_uid: None,
             fixed_gid: None,
-            truncate_existing: false,
         }
     }
 }

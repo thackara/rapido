@@ -96,7 +96,15 @@ fn params_usage(params: &[Argument]) {
     println!("\nExample: find fs-tree/ | dracut-cpio archive.cpio\n");
 }
 
-fn params_process(props: &mut cpio::ArchiveProperties) -> argument::Result<PathBuf> {
+fn params_process(
+    props: &mut cpio::ArchiveProperties,
+) -> argument::Result<(PathBuf, bool)> {
+    // If OUTPUT file exists, then zero-truncate it instead of appending. The
+    // default append behaviour chains archives back-to-back, i.e. multiple
+    // archives will be separated by a TRAILER and 512-byte padding.
+    // See Linux's Documentation/driver-api/early-userspace/buffer-format.rst
+    // for details on how chained initramfs archives are handled.
+    let mut truncate_existing = false;
     let params = &[
         Argument::positional("OUTPUT", "Write cpio archive to this file path."),
         Argument::value(
@@ -183,7 +191,7 @@ fn params_process(props: &mut cpio::ArchiveProperties) -> argument::Result<PathB
                 props.fixed_uid = Some(ugv_parsed[0]);
                 props.fixed_gid = Some(ugv_parsed[1]);
             }
-            "truncate-existing" => props.truncate_existing = true,
+            "truncate-existing" => truncate_existing = true,
             "help" => return Err(argument::Error::PrintHelp),
             _ => unreachable!(),
         };
@@ -206,12 +214,12 @@ fn params_process(props: &mut cpio::ArchiveProperties) -> argument::Result<PathB
     }
 
     let last_arg = env::args_os().last().unwrap();
-    Ok(PathBuf::from(&last_arg))
+    Ok((PathBuf::from(&last_arg), truncate_existing))
 }
 
 fn main() -> io::Result<()> {
     let mut props = cpio::ArchiveProperties::default();
-    let output_path = match params_process(&mut props) {
+    let (output_path, truncate_existing) = match params_process(&mut props) {
         Ok(p) => p,
         Err(argument::Error::PrintHelp) => return Ok(()),
         Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidInput, e.to_string())),
@@ -221,9 +229,9 @@ fn main() -> io::Result<()> {
         .read(false)
         .write(true)
         .create(true)
-        .truncate(props.truncate_existing)
+        .truncate(truncate_existing)
         .open(&output_path)?;
-    if !props.truncate_existing {
+    if !truncate_existing {
         props.initial_data_off = f.seek(io::SeekFrom::End(0))?;
     }
     let mut writer = io::BufWriter::new(f);

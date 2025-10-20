@@ -260,21 +260,17 @@ fn main() -> io::Result<()> {
     };
 
     let mut cpio_props = cpio::ArchiveProperties::default();
-    // for rapido we normally want to truncate any existing output file
-    cpio_props.truncate_existing = true;
     // Attempt 4K file data alignment within archive for Btrfs/XFS reflinks
     cpio_props.data_align = 4096;
     let mut cpio_state = cpio::ArchiveState::new(cpio_props.initial_ino);
 
-    let mut cpio_f = fs::OpenOptions::new()
+    let cpio_f = fs::OpenOptions::new()
         .read(false)
         .write(true)
         .create(true)
-        .truncate(cpio_props.truncate_existing)
+        // for rapido we normally want to truncate any existing output file
+        .truncate(true)
         .open(&cpio_out_path)?;
-    if !cpio_props.truncate_existing {
-        cpio_props.initial_data_off = cpio_f.seek(io::SeekFrom::End(0))?;
-    }
     let mut cpio_writer = io::BufWriter::new(cpio_f);
 
     // @libs_seen is an optimization to avoid resolving already-seen elf deps.
