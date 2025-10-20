@@ -329,7 +329,6 @@ fn main() -> io::Result<()> {
         state.libs.off += 1;
     }
 
-    cpio::archive_flush_unseen_hardlinks(&mut cpio_state, &cpio_props, &mut cpio_writer)?;
     cpio::archive_trailer(&mut cpio_writer, cpio_state.off)?;
     cpio_writer.flush()?;
 

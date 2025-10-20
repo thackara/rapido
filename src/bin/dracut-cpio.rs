@@ -73,7 +73,6 @@ fn archive_loop<R: BufRead, W: Seek + Write>(
             }
         };
     }
-    cpio::archive_flush_unseen_hardlinks(&mut state, props, &mut writer)?;
     state.off = cpio::archive_trailer(&mut writer, state.off)?;
 
     // GNU cpio pads the end of an archive out to blocklen with zeros
