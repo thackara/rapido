@@ -67,7 +67,9 @@ impl ArchiveProperties {
     }
 }
 
-pub struct ArchiveState {
+pub struct ArchiveState<'a> {
+    // static properties, provided during initialization
+    props: &'a ArchiveProperties,
     // offset from the start of this archive
     off: u64,
     // next mapped inode number, used instead of source file inode numbers to
@@ -76,18 +78,18 @@ pub struct ArchiveState {
     ino: u32,
 }
 
-impl ArchiveState {
-    pub fn new(ino_start: u32) -> ArchiveState {
+impl ArchiveState<'_> {
+    pub fn new(props: &ArchiveProperties) -> ArchiveState {
         ArchiveState {
             off: 0,
-            ino: ino_start,
+            ino: props.initial_ino,
+            props,
         }
     }
 }
 
 pub fn archive_path<W: Seek + Write>(
     state: &mut ArchiveState,
-    props: &ArchiveProperties,
     path: &Path,
     md: &fs::Metadata,
     mut writer: W,
@@ -128,7 +130,7 @@ pub fn archive_path<W: Seek + Write>(
         ));
     }
 
-    let mtime: u32 = match props.fixed_mtime {
+    let mtime: u32 = match state.props.fixed_mtime {
         Some(t) => t,
         None => {
             // check for 2106 epoch overflow
@@ -160,11 +162,11 @@ pub fn archive_path<W: Seek + Write>(
             i
         },
         mode = md.mode(),
-        uid = match props.fixed_uid {
+        uid = match state.props.fixed_uid {
             Some(u) => u,
             None => md.uid(),
         },
-        gid = match props.fixed_gid {
+        gid = match state.props.fixed_gid {
             Some(g) => g,
             None => md.gid(),
         },
@@ -197,7 +199,6 @@ pub fn archive_path<W: Seek + Write>(
 
 pub fn archive_symlink<W: Seek + Write>(
     state: &mut ArchiveState,
-    props: &ArchiveProperties,
     path: &Path,
     md: &fs::Metadata,
     symlink_tgt: &Path,
@@ -245,7 +246,7 @@ pub fn archive_symlink<W: Seek + Write>(
         ));
     }
 
-    let mtime: u32 = match props.fixed_mtime {
+    let mtime: u32 = match state.props.fixed_mtime {
         Some(t) => t,
         None => {
             // check for 2106 epoch overflow
@@ -269,11 +270,11 @@ pub fn archive_symlink<W: Seek + Write>(
             i
         },
         mode = md.mode(),
-        uid = match props.fixed_uid {
+        uid = match state.props.fixed_uid {
             Some(u) => u,
             None => md.uid(),
         },
-        gid = match props.fixed_gid {
+        gid = match state.props.fixed_gid {
             Some(g) => g,
             None => md.gid(),
         },
@@ -312,7 +313,6 @@ pub fn archive_symlink<W: Seek + Write>(
 
 pub fn archive_file<W: Seek + Write>(
     state: &mut ArchiveState,
-    props: &ArchiveProperties,
     path: &Path,
     md: &fs::Metadata,
     in_file: &fs::File,
@@ -342,7 +342,7 @@ pub fn archive_file<W: Seek + Write>(
 
     dout!("archiving file {} with mode {:o}", outpath.display(), md.mode());
 
-    let mtime: u32 = match props.fixed_mtime {
+    let mtime: u32 = match state.props.fixed_mtime {
         Some(t) => t,
         None => {
             // check for 2106 epoch overflow
@@ -378,7 +378,7 @@ pub fn archive_file<W: Seek + Write>(
         );
     }
 
-    if props.data_align > 0 && datalen > props.data_align {
+    if state.props.data_align > 0 && datalen > state.props.data_align {
         // XXX we're "bending" the newc spec a bit here to inject zeros
         // after fname to provide data segment alignment. These zeros are
         // accounted for in the namesize, but some applications may only
@@ -387,16 +387,16 @@ pub fn archive_file<W: Seek + Write>(
         // exceeded.
         data_align_seek = {
             let len: u64 = archive_padlen(
-                props.initial_data_off + state.off + NEWC_HDR_LEN + fname.len() as u64 + 1,
-                u64::from(props.data_align),
+                state.props.initial_data_off + state.off + NEWC_HDR_LEN + fname.len() as u64 + 1,
+                u64::from(state.props.data_align),
             );
             let padded_namesize = len + fname.len() as u64 + 1;
-            if padded_namesize > u64::from(props.namesize_max) {
+            if padded_namesize > u64::from(state.props.namesize_max) {
                 dout!(
                     "{} misaligned. Required padding {} exceeds namesize maximum {}.",
                     outpath.display(),
                     len,
-                    props.namesize_max
+                    state.props.namesize_max
                 );
                 0
             } else {
@@ -415,11 +415,11 @@ pub fn archive_file<W: Seek + Write>(
             i
         },
         mode = md.mode(),
-        uid = match props.fixed_uid {
+        uid = match state.props.fixed_uid {
             Some(u) => u,
             None => md.uid(),
         },
-        gid = match props.fixed_gid {
+        gid = match state.props.fixed_gid {
             Some(g) => g,
             None => md.gid(),
         },

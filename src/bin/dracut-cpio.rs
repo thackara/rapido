@@ -26,7 +26,7 @@ fn archive_loop<R: BufRead, W: Seek + Write>(
         ));
     }
 
-    let mut state = cpio::ArchiveState::new(props.initial_ino);
+    let mut state = cpio::ArchiveState::new(props);
     loop {
         let mut linebuf: Vec<u8> = Vec::new();
         let mut r = reader.by_ref().take(cpio::PATH_MAX);
@@ -64,14 +64,14 @@ fn archive_loop<R: BufRead, W: Seek + Write>(
         match fs::symlink_metadata(path) {
             Ok(m) if m.is_file() => {
                 let f = fs::OpenOptions::new().read(true).open(&path)?;
-                cpio::archive_file(&mut state, props, path, &m, &f, &mut writer)?;
+                cpio::archive_file(&mut state, path, &m, &f, &mut writer)?;
             },
             Ok(m) if m.is_symlink() => {
                 let tgt = fs::read_link(path)?;
-                cpio::archive_symlink(&mut state, props, path, &m, &tgt, &mut writer)?;
+                cpio::archive_symlink(&mut state, path, &m, &tgt, &mut writer)?;
             },
             Ok(m) => {
-                cpio::archive_path(&mut state, props, path, &m, &mut writer)?;
+                cpio::archive_path(&mut state, path, &m, &mut writer)?;
             },
             Err(e) => {
                 println!("failed to get metadata for {}: {}", path.display(), e);
