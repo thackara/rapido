@@ -33,20 +33,6 @@ macro_rules! dout {
 pub const NEWC_HDR_LEN: u64 = 110;
 pub const PATH_MAX: u64 = 4096;
 
-struct HardlinkPath {
-    infile: PathBuf,
-    outfile: PathBuf,
-}
-
-struct HardlinkState {
-    names: Vec<HardlinkPath>,
-    source_ino: u64,
-    source_dev: u64,
-    mapped_ino: u32,
-    nlink: u32,
-    seen: u32,
-}
-
 pub struct ArchiveProperties {
     // first inode number to use. @ArchiveState.ino increments from this.
     pub initial_ino: u32,
@@ -67,10 +53,6 @@ pub struct ArchiveProperties {
     pub fixed_mtime: Option<u32>,
     pub fixed_uid: Option<u32>,
     pub fixed_gid: Option<u32>,
-    // When archiving a subset of hardlinks, nlink values in the archive can
-    // represent the subset (renumber_nlink=true) or the original source file
-    // nlink values (renumber_nlink=false), where the latter matches GNU cpio.
-    pub renumber_nlink: bool,
     // If OUTPUT file exists, then zero-truncate it instead of appending. The
     // default append behaviour chains archives back-to-back, i.e. multiple
     // archives will be separated by a TRAILER and 512-byte padding.
@@ -90,15 +72,12 @@ impl ArchiveProperties {
             fixed_mtime: None,
             fixed_uid: None,
             fixed_gid: None,
-            renumber_nlink: false,
             truncate_existing: false,
         }
     }
 }
 
 pub struct ArchiveState {
-    // dev + inode provides hardlink state tracking
-    hls: Vec<HardlinkState>,
     // offset from the start of this archive
     pub off: u64,
     // next mapped inode number, used instead of source file inode numbers to
@@ -110,140 +89,9 @@ pub struct ArchiveState {
 impl ArchiveState {
     pub fn new(ino_start: u32) -> ArchiveState {
         ArchiveState {
-            hls: Vec::new(),
             off: 0,
             ino: ino_start,
         }
-    }
-
-    // Check whether we've already seen this hardlink's dev/inode combination.
-    // If already seen, fill the existing mapped_ino.
-    // Return true if this entry has been deferred (seen != nlinks)
-    pub fn hardlink_seen<W: Write + Seek>(
-        &mut self,
-        props: &ArchiveProperties,
-        mut writer: W,
-        md: fs::Metadata,
-        inpath: &Path,
-        outpath: &Path,
-        mapped_ino: &mut Option<u32>,
-        mapped_nlink: &mut Option<u32>,
-    ) -> io::Result<bool> {
-        assert!(md.nlink() > 1);
-        let (_index, hl) = match self.hls
-            .iter_mut()
-            .enumerate()
-            .find(|(_, hl)| hl.source_ino == md.ino() && hl.source_dev == md.dev())
-        {
-            Some(hl) => hl,
-            None => {
-                self.hls.push(HardlinkState {
-                    names: vec![HardlinkPath {
-                        infile: inpath.to_path_buf(),
-                        outfile: outpath.to_path_buf(),
-                    }],
-                    source_dev: md.dev(),
-                    source_ino: md.ino(),
-                    mapped_ino: self.ino,
-                    nlink: md.nlink().try_into().unwrap(), // pre-checked
-                    seen: 1,
-                });
-                self.ino += 1; // ino is reserved for all subsequent links
-                return Ok(true);
-            }
-        };
-
-        if (*hl).names.iter().any(|n| n.infile == inpath) {
-            println!(
-                "duplicate hardlink path {} for {}",
-                inpath.display(),
-                md.ino()
-            );
-            // GNU cpio doesn't swallow duplicates
-        }
-
-        // hl.nlink may not match md.nlink if we've come here via
-        // archive_flush_unseen_hardlinks() .
-
-        (*hl).seen += 1;
-        if (*hl).seen > (*hl).nlink {
-            // GNU cpio powers through if a hardlink is listed multiple times,
-            // exceeding nlink.
-            println!("hardlink seen {} exceeds nlink {}", (*hl).seen, (*hl).nlink);
-        }
-
-        if (*hl).seen < (*hl).nlink {
-            (*hl).names.push(HardlinkPath {
-                infile: inpath.to_path_buf(),
-                outfile: outpath.to_path_buf(),
-            });
-            return Ok(true);
-        }
-
-        // a new HardlinkPath entry isn't added, as return path handles cpio
-        // outpath header *and* data segment.
-
-        for path in (*hl).names.iter().rev() {
-            dout!("writing hardlink {}", path.outfile.display());
-            // length already PATH_MAX validated
-            let fname = path.outfile.as_os_str().as_bytes();
-
-            write!(
-                writer,
-                NEWC_HDR_FMT!(),
-                magic = "070701",
-                ino = (*hl).mapped_ino,
-                mode = md.mode(),
-                uid = match props.fixed_uid {
-                    Some(u) => u,
-                    None => md.uid(),
-                },
-                gid = match props.fixed_gid {
-                    Some(g) => g,
-                    None => md.gid(),
-                },
-                nlink = match props.renumber_nlink {
-                    true => (*hl).nlink,
-                    false => md.nlink().try_into().unwrap(),
-                },
-                mtime = match props.fixed_mtime {
-                    Some(t) => t,
-                    None => md.mtime().try_into().unwrap(),
-                },
-                filesize = 0,
-                major = 0,
-                minor = 0,
-                rmajor = 0,
-                rminor = 0,
-                namesize = fname.len() + 1,
-                chksum = 0
-            )?;
-            self.off += NEWC_HDR_LEN;
-            writer.write_all(fname)?;
-            self.off += fname.len() as u64;
-            // +1 as padding starts after fname nulterm
-            let seeklen = 1 + archive_padlen(self.off + 1, 4);
-            {
-                let z = vec![0u8; seeklen.try_into().unwrap()];
-                writer.write_all(&z)?;
-            }
-            self.off += seeklen;
-        }
-        *mapped_ino = Some((*hl).mapped_ino);
-        // cpio nlink may be different to stat nlink if only a subset of links
-        // are archived.
-        if props.renumber_nlink {
-            *mapped_nlink = Some((*hl).nlink);
-        }
-
-        // GNU cpio: if a name is given multiple times, exceeding nlink, then
-        // subsequent names continue to be packed (with a repeat data segment),
-        // using the same mapped inode.
-        dout!("resetting hl with dev {} ino {}", hl.source_dev, hl.source_ino);
-        hl.seen = 0;
-        hl.names.clear();
-
-        return Ok(false);
     }
 }
 
@@ -392,10 +240,7 @@ pub fn archive_file<W: Seek + Write>(
     in_file: &fs::File,
     mut writer: W,
 ) -> io::Result<()> {
-    let inpath = path;
     let mut outpath = path;
-    let mut hardlink_ino: Option<u32> = None;
-    let mut hardlink_nlink: Option<u32> = None;
     let mut data_align_seek: u32 = 0;
 
     if !md.file_type().is_file() {
@@ -444,28 +289,15 @@ pub fn archive_file<W: Seek + Write>(
     };
 
     if md.nlink() > 1 {
-        if md.nlink() > u32::MAX as u64 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "nlink too large",
-            ));
-        }
-
-        // follow GNU cpio's behaviour of attaching hardlink data only to
-        // the last entry in the archive.
-        let deferred = state.hardlink_seen(
-            &props,
-            &mut writer,
-            md.clone(),
-            &inpath,
-            outpath,
-            &mut hardlink_ino,
-            &mut hardlink_nlink,
-        )?;
-        if deferred {
-            dout!("deferring hardlink {} data portion", outpath.display());
-            return Ok(());
-        }
+        // For simplicity's sake, hardlinks are archived like regular files,
+        // i.e. they're always assigned a unique inode number and carry a
+        // corresponding data segment (if present). Use symlinks, or if you
+        // really need hardlinks then create them during init.
+        eprintln!(
+            "{}: (nlink={}) hardlink file data may be duplicated",
+            outpath.display(),
+            md.nlink()
+        );
     }
 
     if props.data_align > 0 && datalen > props.data_align {
@@ -499,13 +331,10 @@ pub fn archive_file<W: Seek + Write>(
         writer,
         NEWC_HDR_FMT!(),
         magic = "070701",
-        ino = match hardlink_ino {
-            Some(i) => i,
-            None => {
-                let i = state.ino;
-                state.ino += 1;
-                i
-            }
+        ino = {
+            let i = state.ino;
+            state.ino += 1;
+            i
         },
         mode = md.mode(),
         uid = match props.fixed_uid {
@@ -516,10 +345,8 @@ pub fn archive_file<W: Seek + Write>(
             Some(g) => g,
             None => md.gid(),
         },
-        nlink = match hardlink_nlink {
-            Some(n) => n,
-            None => md.nlink().try_into().unwrap(),
-        },
+        // see hardlink note above
+        nlink = 1,
         mtime = mtime,
         filesize = datalen,
         major = 0,
@@ -570,49 +397,6 @@ pub fn archive_file<W: Seek + Write>(
 
 pub fn archive_padlen(off: u64, alignment: u64) -> u64 {
     (alignment - (off & (alignment - 1))) % alignment
-}
-
-// this fn is inefficient, but optimizing for hardlinks isn't high priority
-pub fn archive_flush_unseen_hardlinks<W: Write + Seek>(
-    state: &mut ArchiveState,
-    props: &ArchiveProperties,
-    mut writer: W,
-) -> io::Result<()> {
-    let mut deferred_inpaths: Vec<PathBuf> = Vec::new();
-    for hl in state.hls.iter_mut() {
-        if hl.seen == 0 || hl.seen == hl.nlink {
-            dout!("HardlinkState complete with seen {}", hl.seen);
-            continue;
-        }
-        dout!(
-            "pending HardlinkState with seen {} != nlinks {}",
-            hl.seen,
-            hl.nlink
-        );
-
-        while hl.names.len() > 0 {
-            let path = hl.names.pop().unwrap();
-            deferred_inpaths.push(path.infile);
-        }
-        // ensure that data segment gets added on archive_path recall
-        hl.nlink = hl.seen;
-        hl.seen = 0;
-        // existing allocated inode should be used
-    }
-
-    if deferred_inpaths.len() > 0 {
-        // rotate-right to match gnu ordering
-        deferred_inpaths.rotate_right(1);
-
-        // .reverse() to match gnu ordering
-        for p in deferred_inpaths.iter().rev() {
-            let md = fs::symlink_metadata(p.as_path())?;
-            let f = fs::OpenOptions::new().read(true).open(p.as_path())?;
-            archive_file(state, props, p.as_path(), &md, &f, &mut writer)?;
-        }
-    }
-
-    Ok(())
 }
 
 pub fn archive_trailer<W: Write>(mut writer: W, cur_off: u64) -> io::Result<u64> {
