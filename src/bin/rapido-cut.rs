@@ -8,7 +8,7 @@ use std::io;
 use std::io::Seek;
 use std::io::Write;
 use std::os::unix::fs::MetadataExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use elf::abi;
 use elf::ElfStream;
 use elf::endian::AnyEndian;
@@ -37,19 +37,18 @@ const LIB_PATHS: [&str; 2] = [ "/usr/lib64", "/usr/lib" ];
 // access to parent or special paths; this should all be handled by the OS.
 fn path_stat(name: &str, search_paths: &[&str]) -> Option<Fsent> {
     dout!("resolving path for {:?}", name);
-    let rname = std::path::Path::new(&name);
     // if name has any separator in it then we should handle it as a relative
     // or absolute path. This should be close enough as a check.
     if name.contains(std::path::MAIN_SEPARATOR_STR) {
-        dout!("using relative / absolute path {:?} as-is", rname);
-        return match fs::symlink_metadata(rname) {
-            Ok(md) => Some(Fsent {path: rname.to_path_buf(), md: md}),
+        dout!("using relative / absolute path {:?} as-is", name);
+        return match fs::symlink_metadata(name) {
+            Ok(md) => Some(Fsent {path: PathBuf::from(name), md: md}),
             Err(_) => None,
         }
     }
 
     for dir in search_paths.iter() {
-        let p = PathBuf::from(dir).join(rname);
+        let p = PathBuf::from(dir).join(name);
         let md = fs::symlink_metadata(&p);
         if md.is_ok() {
             return Some(Fsent {path: p, md: md.unwrap()});
@@ -61,7 +60,7 @@ fn path_stat(name: &str, search_paths: &[&str]) -> Option<Fsent> {
 
 // Parse ELF NEEDED entries to gather shared object dependencies
 // This function intentionally ignores any DT_RPATH paths.
-fn elf_deps(f: &fs::File, path: &PathBuf, dups_filter: &mut HashMap<String, u64>) -> Result<Vec<String>, io::Error> {
+fn elf_deps(f: &fs::File, path: &Path, dups_filter: &mut HashMap<String, u64>) -> Result<Vec<String>, io::Error> {
     let mut ret: Vec<String> = vec![];
 
     let mut file = match ElfStream::<AnyEndian, _>::open_stream(f) {
@@ -134,7 +133,7 @@ fn elf_deps(f: &fs::File, path: &PathBuf, dups_filter: &mut HashMap<String, u64>
 }
 
 fn gather_archive_file<W: Seek + Write>(
-    path: &PathBuf,
+    path: &Path,
     md: &fs::Metadata,
     mode_mask: Option<u32>,
     libs_names: &mut Vec<String>,
@@ -142,9 +141,9 @@ fn gather_archive_file<W: Seek + Write>(
     cpio_state: &mut cpio::ArchiveState,
     mut cpio_writer: W,
 ) -> io::Result<()> {
-    let mut f = fs::OpenOptions::new().read(true).open(&path)?;
+    let mut f = fs::OpenOptions::new().read(true).open(path)?;
     if mode_mask.is_none() || mode_mask.unwrap() & md.mode() != 0 {
-        match elf_deps(&f, &path, libs_seen_filter) {
+        match elf_deps(&f, path, libs_seen_filter) {
             Ok(mut d) => libs_names.append(&mut d),
             Err(ref e) if e.kind() == io::ErrorKind::InvalidInput => {
                 dout!("executable {:?} not an elf", path);
@@ -157,7 +156,7 @@ fn gather_archive_file<W: Seek + Write>(
     // don't check for '#!' interpreters like Dracut, it's messy
 
     f.seek(io::SeekFrom::Start(0))?;
-    cpio::archive_file(cpio_state, &path, &md, &f, &mut cpio_writer)?;
+    cpio::archive_file(cpio_state, path, &md, &f, &mut cpio_writer)?;
 
     Ok(())
 }
