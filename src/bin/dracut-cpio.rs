@@ -796,7 +796,10 @@ mod tests {
     }
 
     #[test]
-    fn test_archive_hardlinks_order() {
+    // dracut-cpio now duplicates any hardlink data and assigns unique inode
+    // numbers, so we're not cpio-output compatible with GNU cpio. Instead,
+    // just test to confirm that data segments match.
+    fn test_archive_hardlinks() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_file("file.txt", 512 * 4);
         fs::hard_link("file.txt", "link1.txt").unwrap();
@@ -806,111 +809,52 @@ mod tests {
         twd.create_tmp_file("another.txt", 512 * 4);
         let file_list: &str = "file.txt\nanother.txt\nlink1.txt\nlink2.txt\n";
 
-        gnu_cpio_create(file_list.as_bytes(), "gnu.cpio");
-        twd.cleanup_files.push(PathBuf::from("gnu.cpio"));
+        twd.create_tmp_dir("gnu");
+        twd.create_tmp_dir("dracut");
 
-        let f = fs::File::create("dracut.cpio").unwrap();
+        gnu_cpio_create(file_list.as_bytes(), "gnu/gnu.cpio");
+        twd.cleanup_files.push(PathBuf::from("gnu/gnu.cpio"));
+
+        let f = fs::File::create("dracut/dracut.cpio").unwrap();
         let mut writer = io::BufWriter::new(f);
         let mut reader = io::BufReader::new(file_list.as_bytes());
         let wrote = archive_loop(&mut reader, &mut writer, &cpio::ArchiveProperties::default()).unwrap();
-        twd.cleanup_files.push(PathBuf::from("dracut.cpio"));
+        twd.cleanup_files.push(PathBuf::from("dracut/dracut.cpio"));
         assert!(wrote > cpio::NEWC_HDR_LEN * 5 + 512 * 8);
 
-        let status = Command::new("diff")
-            .args(&["gnu.cpio", "dracut.cpio"])
+        // extract gnu archive
+        let status = Command::new("cpio")
+            .current_dir("gnu")
+            .args(&["--quiet", "-i", "-H", "newc", "-F", "gnu.cpio"])
             .status()
-            .expect("diff failed to start");
+            .expect("GNU cpio failed to start");
         assert!(status.success());
-    }
 
-    #[test]
-    fn test_archive_hardlinks_empty() {
-        let mut twd = TempWorkDir::new();
-        twd.create_tmp_file("file.txt", 0);
-        fs::hard_link("file.txt", "link1.txt").unwrap();
-        twd.cleanup_files.push(PathBuf::from("link1.txt"));
-        fs::hard_link("file.txt", "link2.txt").unwrap();
-        twd.cleanup_files.push(PathBuf::from("link2.txt"));
-        twd.create_tmp_file("another.txt", 512 * 4);
-        let file_list: &str = "file.txt\nanother.txt\nlink1.txt\nlink2.txt\n";
-
-        gnu_cpio_create(file_list.as_bytes(), "gnu.cpio");
-        twd.cleanup_files.push(PathBuf::from("gnu.cpio"));
-
-        let f = fs::File::create("dracut.cpio").unwrap();
-        let mut writer = io::BufWriter::new(f);
-        let mut reader = io::BufReader::new(file_list.as_bytes());
-        let wrote = archive_loop(&mut reader, &mut writer, &cpio::ArchiveProperties::default()).unwrap();
-        twd.cleanup_files.push(PathBuf::from("dracut.cpio"));
-        assert!(wrote > cpio::NEWC_HDR_LEN * 5 + 512 * 4);
-
-        let status = Command::new("diff")
-            .args(&["gnu.cpio", "dracut.cpio"])
+        // extract dracut archive
+        let status = Command::new("cpio")
+            .current_dir("dracut")
+            .args(&["--quiet", "-i", "-H", "newc", "-F", "dracut.cpio"])
             .status()
-            .expect("diff failed to start");
+            .expect("GNU cpio failed to start");
         assert!(status.success());
-    }
 
-    #[test]
-    fn test_archive_hardlinks_missing() {
-        let mut twd = TempWorkDir::new();
-        twd.create_tmp_file("file.txt", 512 * 4);
-        fs::hard_link("file.txt", "link1.txt").unwrap();
-        twd.cleanup_files.push(PathBuf::from("link1.txt"));
-        fs::hard_link("file.txt", "link2.txt").unwrap();
-        twd.cleanup_files.push(PathBuf::from("link2.txt"));
-        fs::hard_link("file.txt", "link3.txt").unwrap();
-        twd.cleanup_files.push(PathBuf::from("link3.txt"));
-        twd.create_tmp_file("another.txt", 512 * 4);
-        // link2 missing from the archive, throwing off deferrals
-        let file_list: &str = "file.txt\nanother.txt\nlink1.txt\nlink3.txt\n";
 
-        gnu_cpio_create(file_list.as_bytes(), "gnu.cpio");
-        twd.cleanup_files.push(PathBuf::from("gnu.cpio"));
+        for f in file_list.split('\n') {
+            if f == "" {
+                continue;
+            }
+            let g_path = format!("{}/{}", "gnu", &f);
+            let d_path = format!("{}/{}", "dracut", &f);
 
-        let f = fs::File::create("dracut.cpio").unwrap();
-        let mut writer = io::BufWriter::new(f);
-        let mut reader = io::BufReader::new(file_list.as_bytes());
-        let wrote = archive_loop(&mut reader, &mut writer, &cpio::ArchiveProperties::default()).unwrap();
-        twd.cleanup_files.push(PathBuf::from("dracut.cpio"));
-        assert!(wrote > cpio::NEWC_HDR_LEN * 5 + 512 * 8);
+            twd.cleanup_files.push(PathBuf::from(&g_path));
+            twd.cleanup_files.push(PathBuf::from(&d_path));
 
-        let status = Command::new("diff")
-            .args(&["gnu.cpio", "dracut.cpio"])
-            .status()
-            .expect("diff failed to start");
-        assert!(status.success());
-    }
-
-    #[test]
-    fn test_archive_hardlinks_multi() {
-        let mut twd = TempWorkDir::new();
-        twd.create_tmp_file("file.txt", 512 * 4);
-        fs::hard_link("file.txt", "link1.txt").unwrap();
-        twd.cleanup_files.push(PathBuf::from("link1.txt"));
-        fs::hard_link("file.txt", "link2.txt").unwrap();
-        twd.cleanup_files.push(PathBuf::from("link2.txt"));
-        twd.create_tmp_file("another.txt", 512 * 4);
-        fs::hard_link("another.txt", "anotherlink.txt").unwrap();
-        twd.cleanup_files.push(PathBuf::from("anotherlink.txt"));
-        // link2 missing from the archive, throwing off deferrals
-        let file_list: &str = "file.txt\nanother.txt\nlink1.txt\nanotherlink.txt\n";
-
-        gnu_cpio_create(file_list.as_bytes(), "gnu.cpio");
-        twd.cleanup_files.push(PathBuf::from("gnu.cpio"));
-
-        let f = fs::File::create("dracut.cpio").unwrap();
-        let mut writer = io::BufWriter::new(f);
-        let mut reader = io::BufReader::new(file_list.as_bytes());
-        let wrote = archive_loop(&mut reader, &mut writer, &cpio::ArchiveProperties::default()).unwrap();
-        twd.cleanup_files.push(PathBuf::from("dracut.cpio"));
-        assert!(wrote > cpio::NEWC_HDR_LEN * 5 + 512 * 8);
-
-        let status = Command::new("diff")
-            .args(&["gnu.cpio", "dracut.cpio"])
-            .status()
-            .expect("diff failed to start");
-        assert!(status.success());
+            let status = Command::new("diff")
+                .args(&[d_path, g_path])
+                .status()
+                .expect("diff failed to start");
+            assert!(status.success());
+        }
     }
 
     #[test]
@@ -930,35 +874,6 @@ mod tests {
         let wrote = archive_loop(&mut reader, &mut writer, &cpio::ArchiveProperties::default()).unwrap();
         twd.cleanup_files.push(PathBuf::from("dracut.cpio"));
         assert!(wrote > cpio::NEWC_HDR_LEN * 4 + 512 * 12);
-
-        let status = Command::new("diff")
-            .args(&["gnu.cpio", "dracut.cpio"])
-            .status()
-            .expect("diff failed to start");
-        assert!(status.success());
-    }
-
-    #[test]
-    fn test_archive_hardlink_duplicates() {
-        let mut twd = TempWorkDir::new();
-        twd.create_tmp_file("file.txt", 512 * 4);
-        fs::hard_link("file.txt", "ln1.txt").unwrap();
-        twd.cleanup_files.push(PathBuf::from("ln1.txt"));
-        fs::hard_link("file.txt", "ln2.txt").unwrap();
-        twd.cleanup_files.push(PathBuf::from("ln2.txt"));
-        twd.create_tmp_file("f2.txt", 512 * 4);
-        // ln1 listed twice
-        let file_list: &str = "file.txt\nf2.txt\nln1.txt\nln1.txt\nln1.txt\n";
-
-        gnu_cpio_create(file_list.as_bytes(), "gnu.cpio");
-        twd.cleanup_files.push(PathBuf::from("gnu.cpio"));
-
-        let f = fs::File::create("dracut.cpio").unwrap();
-        let mut writer = io::BufWriter::new(f);
-        let mut reader = io::BufReader::new(file_list.as_bytes());
-        let wrote = archive_loop(&mut reader, &mut writer, &cpio::ArchiveProperties::default()).unwrap();
-        twd.cleanup_files.push(PathBuf::from("dracut.cpio"));
-        assert!(wrote > cpio::NEWC_HDR_LEN * 4 + 512 * 8);
 
         let status = Command::new("diff")
             .args(&["gnu.cpio", "dracut.cpio"])
