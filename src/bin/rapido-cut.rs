@@ -140,7 +140,6 @@ fn gather_archive_file<W: Seek + Write>(
     libs_names: &mut Vec<String>,
     libs_seen_filter: &mut HashMap<String, u64>,
     cpio_state: &mut cpio::ArchiveState,
-    cpio_props: &cpio::ArchiveProperties,
     mut cpio_writer: W,
 ) -> io::Result<()> {
     let mut f = fs::OpenOptions::new().read(true).open(&path)?;
@@ -158,7 +157,7 @@ fn gather_archive_file<W: Seek + Write>(
     // don't check for '#!' interpreters like Dracut, it's messy
 
     f.seek(io::SeekFrom::Start(0))?;
-    cpio::archive_file(cpio_state, &cpio_props, &path, &md, &f, &mut cpio_writer)?;
+    cpio::archive_file(cpio_state, &path, &md, &f, &mut cpio_writer)?;
 
     Ok(())
 }
@@ -252,17 +251,18 @@ fn main() -> io::Result<()> {
         },
     };
 
-
     let cpio_out_path = match args_process(&mut state.bins.names) {
         Ok(p) => p,
         Err(argument::Error::PrintHelp) => return Ok(()),
         Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidInput, e.to_string())),
     };
 
-    let mut cpio_props = cpio::ArchiveProperties::default();
-    // Attempt 4K file data alignment within archive for Btrfs/XFS reflinks
-    cpio_props.data_align = 4096;
-    let mut cpio_state = cpio::ArchiveState::new(cpio_props.initial_ino);
+    let cpio_props = cpio::ArchiveProperties{
+        // Attempt 4K file data alignment within archive for Btrfs/XFS reflinks
+        data_align: 4096,
+        ..cpio::ArchiveProperties::default()
+    };
+    let mut cpio_state = cpio::ArchiveState::new(&cpio_props);
 
     let cpio_f = fs::OpenOptions::new()
         .read(false)
@@ -281,7 +281,7 @@ fn main() -> io::Result<()> {
         match path_stat(this_bin.clone(), &BIN_PATHS) {
             Some(got) if got.md.file_type().is_symlink() => {
                 let symlink_tgt = fs::read_link(&got.path)?;
-                cpio::archive_symlink(&mut cpio_state, &cpio_props, &got.path, &got.md, &symlink_tgt, &mut cpio_writer)?;
+                cpio::archive_symlink(&mut cpio_state, &got.path, &got.md, &symlink_tgt, &mut cpio_writer)?;
                 if let Ok(t) = symlink_tgt.into_os_string().into_string() {
                     // FIXME this could loop endlessly; filter dups
                     state.bins.names.push(t);
@@ -292,11 +292,11 @@ fn main() -> io::Result<()> {
                 println!("archived symlink: {:?}", got.path);
             },
             Some(got) if got.md.file_type().is_file() => {
-                gather_archive_file(&got.path, &got.md, Some(0o111), &mut state.libs.names, &mut libs_seen_filter, &mut cpio_state, &cpio_props, &mut cpio_writer)?;
+                gather_archive_file(&got.path, &got.md, Some(0o111), &mut state.libs.names, &mut libs_seen_filter, &mut cpio_state, &mut cpio_writer)?;
                 println!("archived bin: {:?}", got.path);
             },
             Some(got) => {
-                cpio::archive_path(&mut cpio_state, &cpio_props, &got.path, &got.md, &mut cpio_writer)?;
+                cpio::archive_path(&mut cpio_state, &got.path, &got.md, &mut cpio_writer)?;
                 println!("archived other: {:?}", got.path);
             },
             None => {
@@ -311,7 +311,7 @@ fn main() -> io::Result<()> {
         match path_stat(this_lib.clone(), &LIB_PATHS) {
             Some(got) if got.md.file_type().is_symlink() => {
                 let symlink_tgt = fs::read_link(&got.path)?;
-                cpio::archive_symlink(&mut cpio_state, &cpio_props, &got.path, &got.md, &symlink_tgt, &mut cpio_writer)?;
+                cpio::archive_symlink(&mut cpio_state, &got.path, &got.md, &symlink_tgt, &mut cpio_writer)?;
                 if let Ok(t) = symlink_tgt.into_os_string().into_string() {
                     // FIXME this could loop endlessly; filter dups
                     state.libs.names.push(t);
@@ -322,7 +322,7 @@ fn main() -> io::Result<()> {
                 println!("archived lib symlink: {:?}", got.path);
             },
             Some(got) if got.md.file_type().is_file() => {
-                gather_archive_file(&got.path, &got.md, None, &mut state.libs.names, &mut libs_seen_filter, &mut cpio_state, &cpio_props, &mut cpio_writer)?;
+                gather_archive_file(&got.path, &got.md, None, &mut state.libs.names, &mut libs_seen_filter, &mut cpio_state, &mut cpio_writer)?;
                 println!("archived lib: {:?}", got.path);
             },
             Some(_) | None => {
