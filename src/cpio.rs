@@ -8,7 +8,7 @@ use std::io::prelude::*;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::fs::MetadataExt as UnixMetadataExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 macro_rules! NEWC_HDR_FMT {
     () => {
@@ -102,18 +102,15 @@ pub fn archive_path<W: Seek + Write>(
     md: &fs::Metadata,
     mut writer: W,
 ) -> io::Result<()> {
-    let inpath = path;
     let mut outpath = path;
-    let mut datalen: u32 = 0;
     let mut rmajor: u32 = 0;
     let mut rminor: u32 = 0;
-    let mut symlink_tgt = PathBuf::new();
 
     let ftype = md.file_type();
-    if ftype.is_file() {
+    if ftype.is_file() || ftype.is_symlink() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "call archive_file for file archiving",
+            "archive_path does not support files or symlinks",
         ));
     }
 
@@ -155,21 +152,6 @@ pub fn archive_path<W: Seek + Write>(
         }
     };
 
-    if ftype.is_symlink() {
-        symlink_tgt = fs::read_link(inpath)?;
-        datalen = {
-            let d: usize = symlink_tgt.as_os_str().as_bytes().len();
-            if d >= PATH_MAX.try_into().unwrap() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "symlink path too long",
-                ));
-            }
-            d.try_into().unwrap()
-        };
-        // no zero terminator for symlink target path
-    }
-
     // Linux kernel uses 32-bit dev_t, encoded as mmmM MMmm. glibc uses 64-bit
     // MMMM Mmmm mmmM MMmm, which is compatible with the former.
     if ftype.is_block_device() || ftype.is_char_device() {
@@ -198,7 +180,7 @@ pub fn archive_path<W: Seek + Write>(
         },
         nlink = md.nlink() as u32,
         mtime = mtime,
-        filesize = datalen,
+        filesize = 0,
         major = 0,
         minor = 0,
         rmajor = rmajor,
@@ -220,14 +202,120 @@ pub fn archive_path<W: Seek + Write>(
     }
     state.off += seek_len as u64;
 
-    if datalen > 0 {
-        assert!(ftype.is_symlink());
-        writer.write_all(symlink_tgt.as_os_str().as_bytes())?;
-        state.off += u64::from(datalen);
-        let dpad_len: usize = archive_padlen(state.off, 4).try_into().unwrap();
-        write!(writer, "{pad:.padlen$}", padlen = dpad_len, pad = "\0\0\0")?;
-        state.off += dpad_len as u64;
+    Ok(())
+}
+
+pub fn archive_symlink<W: Seek + Write>(
+    state: &mut ArchiveState,
+    props: &ArchiveProperties,
+    path: &Path,
+    md: &fs::Metadata,
+    symlink_tgt: &Path,
+    mut writer: W,
+) -> io::Result<()> {
+    let mut outpath = path;
+    let tgt_bytes = symlink_tgt.as_os_str().as_bytes();
+    let datalen: u32 = {
+        let d: usize = tgt_bytes.len();
+        if d >= PATH_MAX.try_into().unwrap() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "symlink path too long",
+            ));
+        }
+        d.try_into().unwrap()
+    };
+    // no zero terminator for symlink target path
+
+    if !md.file_type().is_symlink() {
+        return Err(io::Error::from(io::ErrorKind::InvalidInput));
     }
+
+    outpath = match outpath.strip_prefix("./") {
+        Ok(p) => {
+            if p.as_os_str().as_bytes().len() == 0 {
+                outpath // retain './' and '.' paths
+            } else {
+                p
+            }
+        }
+        Err(_) => outpath,
+    };
+    let fname = outpath.as_os_str().as_bytes();
+    if fname.len() + 1 >= PATH_MAX.try_into().unwrap() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "path too long"));
+    }
+
+    dout!("archiving {} with mode {:o}", outpath.display(), md.mode());
+
+    if md.nlink() > u32::MAX as u64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "nlink too large",
+        ));
+    }
+
+    let mtime: u32 = match props.fixed_mtime {
+        Some(t) => t,
+        None => {
+            // check for 2106 epoch overflow
+            if md.mtime() > i64::from(u32::MAX) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "mtime too large for cpio",
+                ));
+            }
+            md.mtime().try_into().unwrap()
+        }
+    };
+
+    write!(
+        writer,
+        NEWC_HDR_FMT!(),
+        magic = "070701",
+        ino = {
+            let i = state.ino;
+            state.ino += 1;
+            i
+        },
+        mode = md.mode(),
+        uid = match props.fixed_uid {
+            Some(u) => u,
+            None => md.uid(),
+        },
+        gid = match props.fixed_gid {
+            Some(g) => g,
+            None => md.gid(),
+        },
+        nlink = md.nlink() as u32,
+        mtime = mtime,
+        filesize = datalen,
+        major = 0,
+        minor = 0,
+        rmajor = 0,
+        rminor = 0,
+        namesize = fname.len() + 1,
+        chksum = 0
+    )?;
+    state.off += NEWC_HDR_LEN;
+
+    writer.write_all(fname)?;
+    state.off += fname.len() as u64;
+
+    let mut seek_len: i64 = 1; // fname nulterm
+    let padding_len = archive_padlen(state.off + seek_len as u64, 4);
+    seek_len += padding_len as i64;
+    {
+        let z = vec![0u8; seek_len.try_into().unwrap()];
+        writer.write_all(&z)?;
+    }
+    state.off += seek_len as u64;
+
+    writer.write_all(tgt_bytes)?;
+    state.off += u64::from(datalen);
+    let dpad_len: usize = archive_padlen(state.off, 4).try_into().unwrap();
+    write!(writer, "{pad:.padlen$}", padlen = dpad_len, pad = "\0\0\0")?;
+    state.off += dpad_len as u64;
 
     Ok(())
 }
