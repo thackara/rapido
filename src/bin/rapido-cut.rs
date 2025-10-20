@@ -35,7 +35,7 @@ const LIB_PATHS: [&str; 2] = [ "/usr/lib64", "/usr/lib" ];
 
 // We *should* be running as an unprivileged process, so don't filter or block
 // access to parent or special paths; this should all be handled by the OS.
-fn path_stat(name: String, search_paths: &[&str]) -> Option<Fsent> {
+fn path_stat(name: &str, search_paths: &[&str]) -> Option<Fsent> {
     dout!("resolving path for {:?}", name);
     let rname = std::path::Path::new(&name);
     // if name has any separator in it then we should handle it as a relative
@@ -278,7 +278,7 @@ fn main() -> io::Result<()> {
 
     // process bins first, as they may add to libs *and* bins
     while let Some(this_bin) = state.bins.names.get(state.bins.off) {
-        match path_stat(this_bin.clone(), &BIN_PATHS) {
+        match path_stat(&this_bin, &BIN_PATHS) {
             Some(got) if got.md.file_type().is_symlink() => {
                 let symlink_tgt = fs::read_link(&got.path)?;
                 cpio::archive_symlink(&mut cpio_state, &got.path, &got.md, &symlink_tgt, &mut cpio_writer)?;
@@ -308,7 +308,7 @@ fn main() -> io::Result<()> {
 
     // process libs next, which may add to libs
     while let Some(this_lib) = state.libs.names.get(state.libs.off) {
-        match path_stat(this_lib.clone(), &LIB_PATHS) {
+        match path_stat(&this_lib, &LIB_PATHS) {
             Some(got) if got.md.file_type().is_symlink() => {
                 let symlink_tgt = fs::read_link(&got.path)?;
                 cpio::archive_symlink(&mut cpio_state, &got.path, &got.md, &symlink_tgt, &mut cpio_writer)?;
