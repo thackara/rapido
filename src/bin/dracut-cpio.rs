@@ -64,6 +64,10 @@ fn archive_loop<R: BufRead, W: Seek + Write>(
                 let f = fs::OpenOptions::new().read(true).open(&path)?;
                 cpio::archive_file(&mut state, props, path, &m, &f, &mut writer)?;
             },
+            Ok(m) if m.is_symlink() => {
+                let tgt = fs::read_link(path)?;
+                cpio::archive_symlink(&mut state, props, path, &m, &tgt, &mut writer)?;
+            },
             Ok(m) => {
                 cpio::archive_path(&mut state, props, path, &m, &mut writer)?;
             },

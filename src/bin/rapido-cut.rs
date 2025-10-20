@@ -285,10 +285,14 @@ fn main() -> io::Result<()> {
         match path_stat(this_bin.clone(), &BIN_PATHS) {
             Some(got) if got.md.file_type().is_symlink() => {
                 let symlink_tgt = fs::read_link(&got.path)?;
-                // FIXME this could loop endlessly; filter dups
-                // FIXME error
-                state.bins.names.push(symlink_tgt.into_os_string().into_string().unwrap());
-                cpio::archive_path(&mut cpio_state, &cpio_props, &got.path, &got.md, &mut cpio_writer)?;
+                cpio::archive_symlink(&mut cpio_state, &cpio_props, &got.path, &got.md, &symlink_tgt, &mut cpio_writer)?;
+                if let Ok(t) = symlink_tgt.into_os_string().into_string() {
+                    // FIXME this could loop endlessly; filter dups
+                    state.bins.names.push(t);
+                } else {
+                    eprintln!("bogus symlink target {:?}", &got.path);
+                    return Err(io::Error::from(io::ErrorKind::InvalidInput));
+                }
                 println!("archived symlink: {:?}", got.path);
             },
             Some(got) if got.md.file_type().is_file() => {
@@ -310,11 +314,15 @@ fn main() -> io::Result<()> {
     while let Some(this_lib) = state.libs.names.get(state.libs.off) {
         match path_stat(this_lib.clone(), &LIB_PATHS) {
             Some(got) if got.md.file_type().is_symlink() => {
-                let symlink_tgt = fs::read_link(&got.path).expect("TODO no target for symlink");
-                // FIXME this could loop endlessly; filter dups
-                // FIXME error
-                state.libs.names.push(symlink_tgt.into_os_string().into_string().unwrap());
-                cpio::archive_path(&mut cpio_state, &cpio_props, &got.path, &got.md, &mut cpio_writer)?;
+                let symlink_tgt = fs::read_link(&got.path)?;
+                cpio::archive_symlink(&mut cpio_state, &cpio_props, &got.path, &got.md, &symlink_tgt, &mut cpio_writer)?;
+                if let Ok(t) = symlink_tgt.into_os_string().into_string() {
+                    // FIXME this could loop endlessly; filter dups
+                    state.libs.names.push(t);
+                } else {
+                    eprintln!("bogus symlink target {:?}", &got.path);
+                    return Err(io::Error::from(io::ErrorKind::InvalidInput));
+                }
                 println!("archived lib symlink: {:?}", got.path);
             },
             Some(got) if got.md.file_type().is_file() => {
