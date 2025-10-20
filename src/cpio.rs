@@ -79,7 +79,7 @@ impl ArchiveProperties {
 
 pub struct ArchiveState {
     // offset from the start of this archive
-    pub off: u64,
+    off: u64,
     // next mapped inode number, used instead of source file inode numbers to
     // ensure reproducibility. Inode numbers all share the same dev (major=0
     // minor=0) namespace.
@@ -487,9 +487,12 @@ pub fn archive_padlen(off: u64, alignment: u64) -> u64 {
     (alignment - (off & (alignment - 1))) % alignment
 }
 
-pub fn archive_trailer<W: Write>(mut writer: W, cur_off: u64) -> io::Result<u64> {
-    let fname = "TRAILER!!!";
-    let fname_len = fname.len() + 1;
+pub fn archive_trailer<W: Write>(
+    state: &mut ArchiveState,
+    mut writer: W
+) -> io::Result<u64> {
+    const FNAME: &str = "TRAILER!!!";
+    const FNAME_LEN: usize = FNAME.len() + 1;
 
     write!(
         writer,
@@ -506,20 +509,20 @@ pub fn archive_trailer<W: Write>(mut writer: W, cur_off: u64) -> io::Result<u64>
         minor = 0,
         rmajor = 0,
         rminor = 0,
-        namesize = fname_len,
+        namesize = FNAME_LEN,
         chksum = 0
     )?;
-    let mut off: u64 = cur_off + NEWC_HDR_LEN;
+    state.off += NEWC_HDR_LEN;
 
-    let padding_len = archive_padlen(off + fname_len as u64, 4);
+    let padding_len = archive_padlen(state.off + FNAME_LEN as u64, 4);
     write!(
         writer,
         "{}\0{pad:.padlen$}",
-        fname,
+        FNAME,
         padlen = padding_len as usize,
         pad = "\0\0\0"
     )?;
-    off += fname_len as u64 + padding_len as u64;
+    state.off += FNAME_LEN as u64 + padding_len as u64;
 
-    Ok(off)
+    Ok(state.off)
 }

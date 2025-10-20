@@ -337,7 +337,7 @@ fn main() -> io::Result<()> {
         state.libs.off += 1;
     }
 
-    cpio::archive_trailer(&mut cpio_writer, cpio_state.off)?;
+    cpio::archive_trailer(&mut cpio_state, &mut cpio_writer)?;
     cpio_writer.flush()?;
 
     Ok(())
