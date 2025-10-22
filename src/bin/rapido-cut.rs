@@ -60,8 +60,8 @@ fn path_stat(name: &str, search_paths: &[&str]) -> Option<Fsent> {
 
 // Parse ELF NEEDED entries to gather shared object dependencies
 // This function intentionally ignores any DT_RPATH paths.
-fn elf_deps(f: &fs::File, path: &Path, dups_filter: &mut HashMap<String, u64>) -> Result<Vec<String>, io::Error> {
-    let mut ret: Vec<String> = vec![];
+fn elf_deps(f: &fs::File, path: &Path, dups_filter: &mut HashMap<String, u64>) -> Result<Vec<(String, Option<String>)>, io::Error> {
+    let mut ret: Vec<(String, Option<String>)> = vec![];
 
     let mut file = match ElfStream::<AnyEndian, _>::open_stream(f) {
         Ok(f) => f,
@@ -117,7 +117,7 @@ fn elf_deps(f: &fs::File, path: &Path, dups_filter: &mut HashMap<String, u64>) -
                 let s = sraw.to_string();
                 if *dups_filter.entry(s.clone()).and_modify(|s| *s += 1).or_insert(1) == 1 {
                     dout!("new elf dependency({:?}): {:?}", str_off, s);
-                    ret.push(s);
+                    ret.push((s, None));
                 } else {
                     dout!("duplicate elf dependency({:?}): {:?}", str_off, sraw);
                 }
@@ -189,7 +189,7 @@ fn gather_archive_file<W: Seek + Write>(
     path: &Path,
     md: &fs::Metadata,
     mode_mask: Option<u32>,
-    libs_names: &mut Vec<String>,
+    libs_names: &mut Vec<(String, Option<String>)>,
     libs_seen: &mut HashMap<String, u64>,
     paths_seen: &mut HashMap<PathBuf, u64>,
     cpio_state: &mut cpio::ArchiveState,
@@ -220,13 +220,15 @@ fn args_usage(params: &[Argument]) {
     argument::print_help("rapido-cut", "OUTPUT", params);
 }
 
-fn args_process(inst: &mut Vec<String>) -> argument::Result<PathBuf> {
+fn args_process(
+    inst: &mut Vec<(String, Option<String>)>,
+) -> argument::Result<PathBuf> {
     let params = &[
         Argument::positional("OUTPUT", "Write initramfs archive to this file path."),
         Argument::value(
             "install",
             "FILES",
-            "space separated list of files to put in initramfs with ELF dependencies.",
+            "List of files to archive. Space separated with <src>→<dest> support."
         ),
         Argument::short_flag('h', "help", "Print help message."),
     ];
@@ -237,18 +239,21 @@ fn args_process(inst: &mut Vec<String>) -> argument::Result<PathBuf> {
         match name {
             "" => positional_args += 1,
             "install" => {
-                let inst_parsed: argument::Result<Vec<String>> = value
-                    .unwrap()
-                    .split(' ')
-                    .map(|f| {
-                        f.parse().map_err(|_| argument::Error::InvalidValue {
-                            value: f.to_owned(),
-                            expected: String::from("FILES must be utf-8 strings"),
-                        })
-                    })
-                    .collect();
-
-                inst.append(&mut inst_parsed?);
+                for file in value.unwrap().split(' ') {
+                    let file_parsed = match file.split_once('→') {
+                        // source only
+                        None => (file.to_string(), None),
+                        // source→dest
+                        Some((s, d)) if s == "" || d == "" => {
+                            return Err(argument::Error::InvalidValue {
+                                value: file.to_owned(),
+                                expected: String::from("empty source or dest"),
+                            });
+                        },
+                        Some((s, d)) => (s.to_string(), Some(d.to_string())),
+                    };
+                    inst.push(file_parsed);
+                }
             }
             "help" => return Err(argument::Error::PrintHelp),
             _ => unreachable!(),
@@ -277,8 +282,11 @@ fn args_process(inst: &mut Vec<String>) -> argument::Result<PathBuf> {
 
 fn main() -> io::Result<()> {
     struct Gather {
-        // needed paths are added to the end of the gather list as they are found.
-        names: Vec<String>,
+        // The names tuple is (host-source-path, Option<initramfs-destination).
+        // If Option is None then the destination path will match the source.
+        // Dependencies (elf, kmod, etc.) are added to the end of the gather
+        // list as they are found.
+        names: Vec<(String, Option<String>)>,
         // offset that we are currently processing
         off: usize,
         // @names offset which couldn't be found
@@ -333,7 +341,7 @@ fn main() -> io::Result<()> {
     let mut paths_seen: HashMap<PathBuf, u64> = HashMap::new();
 
     // process bins first, as they may add to libs *and* bins
-    while let Some(this_bin) = state.bins.names.get(state.bins.off) {
+    while let Some((this_bin, _)) = state.bins.names.get(state.bins.off) {
         match path_stat(&this_bin, &BIN_PATHS) {
             Some(got) if got.md.file_type().is_symlink() => {
                 gather_archive_dirs(got.path.parent(), &mut paths_seen, &mut cpio_state, &mut cpio_writer)?;
@@ -341,7 +349,7 @@ fn main() -> io::Result<()> {
                 cpio::archive_symlink(&mut cpio_state, &got.path, &got.md, &symlink_tgt, &mut cpio_writer)?;
                 if let Ok(t) = symlink_tgt.into_os_string().into_string() {
                     // FIXME this could loop endlessly; filter dups
-                    state.bins.names.push(t);
+                    state.bins.names.push((t, None));
                 } else {
                     eprintln!("bogus symlink target {:?}", &got.path);
                     return Err(io::Error::from(io::ErrorKind::InvalidInput));
@@ -374,7 +382,7 @@ fn main() -> io::Result<()> {
     }
 
     // process libs next, which may add to libs
-    while let Some(this_lib) = state.libs.names.get(state.libs.off) {
+    while let Some((this_lib, _)) = state.libs.names.get(state.libs.off) {
         match path_stat(&this_lib, &LIB_PATHS) {
             Some(got) if got.md.file_type().is_symlink() => {
                 gather_archive_dirs(got.path.parent(), &mut paths_seen, &mut cpio_state, &mut cpio_writer)?;
@@ -382,7 +390,7 @@ fn main() -> io::Result<()> {
                 cpio::archive_symlink(&mut cpio_state, &got.path, &got.md, &symlink_tgt, &mut cpio_writer)?;
                 if let Ok(t) = symlink_tgt.into_os_string().into_string() {
                     // FIXME this could loop endlessly; filter dups
-                    state.libs.names.push(t);
+                    state.libs.names.push((t, None));
                 } else {
                     eprintln!("bogus symlink target {:?}", &got.path);
                     return Err(io::Error::from(io::ErrorKind::InvalidInput));
