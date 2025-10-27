@@ -61,22 +61,25 @@ fn archive_loop<R: BufRead, W: Seek + Write>(
 
         let linestr = OsStr::from_bytes(linebuf.as_slice());
         let path = Path::new(linestr);
-        match fs::symlink_metadata(path) {
-            Ok(m) if m.is_file() => {
-                let f = fs::OpenOptions::new().read(true).open(&path)?;
-                cpio::archive_file(&mut state, path, &m, &f, &mut writer)?;
-            },
-            Ok(m) if m.is_symlink() => {
-                let tgt = fs::read_link(path)?;
-                cpio::archive_symlink(&mut state, path, &m, &tgt, &mut writer)?;
-            },
-            Ok(m) => {
-                cpio::archive_path(&mut state, path, &m, &mut writer)?;
-            },
+        let amd = match fs::symlink_metadata(path) {
             Err(e) => {
                 println!("failed to get metadata for {}: {}", path.display(), e);
                 return Err(e);
             }
+            Ok(md) => cpio::ArchiveMd::from(&state, &md)?,
+        };
+        match amd.mode & cpio::S_IFMT {
+            cpio::S_IFREG => {
+                let f = fs::OpenOptions::new().read(true).open(&path)?;
+                cpio::archive_file(&mut state, path, &amd, &f, &mut writer)?;
+            },
+            cpio::S_IFLNK => {
+                let tgt = fs::read_link(path)?;
+                cpio::archive_symlink(&mut state, path, &amd, &tgt, &mut writer)?;
+            },
+            _ => {
+                cpio::archive_path(&mut state, path, &amd, &mut writer)?;
+            },
         };
     }
     let mut final_off = cpio::archive_trailer(&mut state, &mut writer)?;
