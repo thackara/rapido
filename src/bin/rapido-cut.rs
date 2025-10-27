@@ -7,8 +7,7 @@ use std::fs;
 use std::io;
 use std::io::Seek;
 use std::io::Write;
-use std::os::unix::fs::MetadataExt;
-use std::path::{Path, PathBuf, Component};
+use std::path::{self, Path, PathBuf, Component};
 use elf::abi;
 use elf::ElfStream;
 use elf::endian::AnyEndian;
@@ -132,10 +131,11 @@ fn elf_deps(f: &fs::File, path: &Path, dups_filter: &mut HashMap<String, u64>) -
     Ok(ret)
 }
 
-// FIXME: work out how symlinks in parents should be handled!
+// XXX: symlinks in parent ancestry will be archived as dirs
 // FIXME: how does this handle relative "" parents?
 fn gather_archive_dirs<W: Seek + Write>(
     path: Option<&Path>,
+    parent_dirs_amd: &cpio::ArchiveMd,
     paths_seen: &mut HashMap<PathBuf, u64>,
     cpio_state: &mut cpio::ArchiveState,
     mut cpio_writer: W,
@@ -143,7 +143,8 @@ fn gather_archive_dirs<W: Seek + Write>(
     // path may come from parent(), hence Option
     let p = match path {
         None => return Ok(()),
-        Some(p) => p.canonicalize()?,
+        // don't canonicalize dirs: dest path may not match host
+        Some(p) => path::absolute(p)?,
     };
 
     if paths_seen.get(&p).is_some() {
@@ -171,14 +172,7 @@ fn gather_archive_dirs<W: Seek + Write>(
             continue;
         }
 
-        // should we stat every dir, or just fudge md for speed?
-        let md = fs::symlink_metadata(&here)?;
-        if !md.is_dir() {
-            eprintln!("non-dir in parent path {:?}", here);
-            return Err(io::Error::from(io::ErrorKind::InvalidInput));
-        }
-
-        cpio::archive_path(cpio_state, &here, &md, &mut cpio_writer)?;
+        cpio::archive_path(cpio_state, &here, &parent_dirs_amd, &mut cpio_writer)?;
         println!("archived dir: {:?}", here);
     }
 
@@ -187,16 +181,15 @@ fn gather_archive_dirs<W: Seek + Write>(
 
 fn gather_archive_file<W: Seek + Write>(
     path: &Path,
-    md: &fs::Metadata,
+    amd: &cpio::ArchiveMd,
     mode_mask: Option<u32>,
     libs_names: &mut Vec<(String, Option<String>)>,
     libs_seen: &mut HashMap<String, u64>,
-    paths_seen: &mut HashMap<PathBuf, u64>,
     cpio_state: &mut cpio::ArchiveState,
     mut cpio_writer: W,
 ) -> io::Result<()> {
     let mut f = fs::OpenOptions::new().read(true).open(path)?;
-    if mode_mask.is_none() || mode_mask.unwrap() & md.mode() != 0 {
+    if mode_mask.is_none() || mode_mask.unwrap() & amd.mode != 0 {
         match elf_deps(&f, path, libs_seen) {
             Ok(mut d) => libs_names.append(&mut d),
             Err(ref e) if e.kind() == io::ErrorKind::InvalidInput => {
@@ -209,9 +202,8 @@ fn gather_archive_file<W: Seek + Write>(
     }
     // don't check for '#!' interpreters like Dracut, it's messy
 
-    gather_archive_dirs(path.parent(), paths_seen, cpio_state, &mut cpio_writer)?;
     f.seek(io::SeekFrom::Start(0))?;
-    cpio::archive_file(cpio_state, path, &md, &f, &mut cpio_writer)?;
+    cpio::archive_file(cpio_state, path, &amd, &f, &mut cpio_writer)?;
 
     Ok(())
 }
@@ -342,11 +334,38 @@ fn main() -> io::Result<()> {
 
     // process bins first, as they may add to libs *and* bins
     while let Some((this_bin, _)) = state.bins.names.get(state.bins.off) {
-        match path_stat(&this_bin, &BIN_PATHS) {
-            Some(got) if got.md.file_type().is_symlink() => {
-                gather_archive_dirs(got.path.parent(), &mut paths_seen, &mut cpio_state, &mut cpio_writer)?;
+        let got = match path_stat(&this_bin, &BIN_PATHS) {
+            Some(fse) => fse,
+            None => {
+                state.bins.missing.push(state.bins.off);
+                state.bins.off += 1;
+                continue;
+            }
+        };
+        let amd = cpio::ArchiveMd::from(&cpio_state, &got.md)?;
+        // mock up md to use for any parent directories. 0111: allow traversal
+        let parent_dirs_amd = cpio::ArchiveMd{
+            mode: match amd.mode & cpio::S_IFMT {
+                cpio::S_IFDIR => amd.mode,
+                _ => (amd.mode & !cpio::S_IFMT) | cpio::S_IFDIR | 0111,
+            },
+            nlink: 2,
+            rmajor: 0,
+            rminor: 0,
+            len: 0,
+            ..amd
+        };
+        gather_archive_dirs(
+            got.path.parent(),
+            &parent_dirs_amd,
+            &mut paths_seen,
+            &mut cpio_state,
+            &mut cpio_writer
+        )?;
+        match amd.mode & cpio::S_IFMT {
+            cpio::S_IFLNK => {
                 let symlink_tgt = fs::read_link(&got.path)?;
-                cpio::archive_symlink(&mut cpio_state, &got.path, &got.md, &symlink_tgt, &mut cpio_writer)?;
+                cpio::archive_symlink(&mut cpio_state, &got.path, &amd, &symlink_tgt, &mut cpio_writer)?;
                 if let Ok(t) = symlink_tgt.into_os_string().into_string() {
                     // FIXME this could loop endlessly; filter dups
                     state.bins.names.push((t, None));
@@ -356,26 +375,21 @@ fn main() -> io::Result<()> {
                 }
                 println!("archived symlink: {:?}", got.path);
             },
-            Some(got) if got.md.file_type().is_file() => {
+            cpio::S_IFREG => {
                 gather_archive_file(
                     &got.path,
-                    &got.md,
+                    &amd,
                     Some(0o111),
                     &mut state.libs.names,
                     &mut libs_seen,
-                    &mut paths_seen,
                     &mut cpio_state,
                     &mut cpio_writer
                 )?;
                 println!("archived bin: {:?}", got.path);
             },
-            Some(got) => {
-                gather_archive_dirs(got.path.parent(), &mut paths_seen, &mut cpio_state, &mut cpio_writer)?;
-                cpio::archive_path(&mut cpio_state, &got.path, &got.md, &mut cpio_writer)?;
+            _ => {
+                cpio::archive_path(&mut cpio_state, &got.path, &amd, &mut cpio_writer)?;
                 println!("archived other: {:?}", got.path);
-            },
-            None => {
-                state.bins.missing.push(state.bins.off);
             },
         };
         state.bins.off += 1;
@@ -383,11 +397,38 @@ fn main() -> io::Result<()> {
 
     // process libs next, which may add to libs
     while let Some((this_lib, _)) = state.libs.names.get(state.libs.off) {
-        match path_stat(&this_lib, &LIB_PATHS) {
-            Some(got) if got.md.file_type().is_symlink() => {
-                gather_archive_dirs(got.path.parent(), &mut paths_seen, &mut cpio_state, &mut cpio_writer)?;
+        let got = match path_stat(&this_lib, &LIB_PATHS) {
+            Some(fse) => fse,
+            None => {
+                state.libs.missing.push(state.libs.off);
+                state.libs.off += 1;
+                continue;
+            }
+        };
+        let amd = cpio::ArchiveMd::from(&cpio_state, &got.md)?;
+        // mock up md to use for any parent directories. 0111: allow traversal
+        let parent_dirs_amd = cpio::ArchiveMd{
+            mode: match amd.mode & cpio::S_IFMT {
+                cpio::S_IFDIR => amd.mode,
+                _ => (amd.mode & !cpio::S_IFMT) | cpio::S_IFDIR | 0o111,
+            },
+            nlink: 2,
+            rmajor: 0,
+            rminor: 0,
+            len: 0,
+            ..amd
+        };
+        gather_archive_dirs(
+            got.path.parent(),
+            &parent_dirs_amd,
+            &mut paths_seen,
+            &mut cpio_state,
+            &mut cpio_writer
+        )?;
+        match amd.mode & cpio::S_IFMT {
+            cpio::S_IFLNK => {
                 let symlink_tgt = fs::read_link(&got.path)?;
-                cpio::archive_symlink(&mut cpio_state, &got.path, &got.md, &symlink_tgt, &mut cpio_writer)?;
+                cpio::archive_symlink(&mut cpio_state, &got.path, &amd, &symlink_tgt, &mut cpio_writer)?;
                 if let Ok(t) = symlink_tgt.into_os_string().into_string() {
                     // FIXME this could loop endlessly; filter dups
                     state.libs.names.push((t, None));
@@ -397,21 +438,24 @@ fn main() -> io::Result<()> {
                 }
                 println!("archived lib symlink: {:?}", got.path);
             },
-            Some(got) if got.md.file_type().is_file() => {
+            cpio::S_IFREG => {
                 gather_archive_file(
                     &got.path,
-                    &got.md,
+                    &amd,
                     None,
                     &mut state.libs.names,
                     &mut libs_seen,
-                    &mut paths_seen,
                     &mut cpio_state,
                     &mut cpio_writer
                 )?;
                 println!("archived lib: {:?}", got.path);
             },
-            Some(_) | None => {
+            _ => {
                 // only support file/symlink library entries
+                eprintln!(
+                    "{:?}: libs gathering only supports symlinks or files, not {}",
+                    got.path, amd.mode
+                );
                 state.libs.missing.push(state.libs.off);
             },
         };
