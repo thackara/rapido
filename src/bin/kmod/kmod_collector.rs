@@ -1,4 +1,8 @@
 // kmod_collector.rs
+use super::kmod_iterator::KmodModuleListIter;
+use super::kmod_wrappers::{KmodContext, KmodModule};
+use std::collections::{HashSet, VecDeque};
+use std::path::PathBuf;
 
 // FFI bindings are placed here as the top-level module where unsafe is permitted.
 // --- FFI BINDINGS ---
@@ -77,3 +81,96 @@ pub mod ffi_bindings {
         //
     }
 }
+
+// --- KmodCollector ---
+// object flow: this is the main logic engine; it holds the context and runs the deps search.
+// ownership: owns the long-lived KmodContext.
+pub struct KmodCollector {
+    context: KmodContext,
+}
+
+impl KmodCollector {
+    pub fn new() -> Result<Self, String> {
+        let context: KmodContext = KmodContext::new()?;
+        Ok(KmodCollector { context })
+    }
+
+    pub fn get_context_ref(&self) -> &KmodContext {
+        &self.context
+    }
+
+    // this runs all module dependencies (hard, soft, weak) recursively.
+    // it returns a unique set of names.
+    pub fn collect_recursive_dependencies(
+        &self,
+        initial_modules: &[(String, Option<String>)],
+    ) -> Result<HashSet<String>, String> {
+        let mut collected: HashSet<String> =
+            initial_modules.iter().map(|(s, _)| s.clone()).collect();
+        let mut queue: VecDeque<String> = initial_modules.iter().map(|(s, _)| s.clone()).collect();
+
+        while let Some(current_mod_name) = queue.pop_front() {
+            let target_mod = match KmodModule::find(&self.context, &current_mod_name) {
+                Ok(m) => m,
+                Err(_) => {
+                    continue;
+                } // skip missing modules
+            };
+
+            // Process all hard, soft, weak dependency types
+            let mut iterators: Vec<KmodModuleListIter> = vec![target_mod.hard_dependencies()];
+            if let Ok(soft_deps) = target_mod.soft_dependencies() {
+                iterators.push(soft_deps.pre);
+                iterators.push(soft_deps.post);
+            }
+            if let Ok(weak_deps_iter) = target_mod.weak_dependencies() {
+                iterators.push(weak_deps_iter);
+            }
+
+            for iter in iterators {
+                for dep_mod in iter {
+                    let dep_name = dep_mod.get_name();
+                    // if we find a new, unique module, add it to the collection and the queue for nested traversal
+                    if collected.insert(dep_name.clone()) {
+                        // recursive dependency checking for kernel modules isn't needed.
+                        // each modules.dep line includes all (inc. transitive)
+                        // dependencies for a given module, not just the immediate ones
+                        // queue.push_back(dep_name);
+                    }
+                }
+            }
+        }
+
+        Ok(collected)
+    }
+
+    // once we have all the names, this function gets the actual
+    // paths needed for archiving into the initrd. we must filter out built-in modules here.
+    pub fn collect_recursive_dependencies_paths(
+        &self,
+        initial_modules: &[(String, Option<String>)],
+    ) -> Result<Vec<PathBuf>, String> {
+        let module_names = self.collect_recursive_dependencies(initial_modules)?;
+        let mut paths: Vec<PathBuf> = Vec::new();
+
+        for mod_name in module_names {
+            let target_mod = match KmodModule::find(&self.context, &mod_name) {
+                Ok(m) => m,
+                Err(_) => continue, // skip if lookup fails
+            };
+
+            let status = target_mod.get_status();
+            let path_str = target_mod.get_path();
+
+            let is_builtin_status = status == "builtin-kernel-module";
+
+            // If the module is NOT built-in AND has a valid path string (not the placeholder), include it.
+            if !is_builtin_status && path_str != "(built-in/not found)" {
+                paths.push(PathBuf::from(path_str));
+            }
+        }
+
+        Ok(paths)
+    }
+}
+// --- end of KmodCollector implementation ---
