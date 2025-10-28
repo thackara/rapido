@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "cpio"
+version = "0.1.0"
+
+[[package]]
 name = "crosvm"
 version = "0.1.0"
 
@@ -18,6 +22,7 @@ version = "0.1.0"
 name = "rapido"
 version = "0.1.0"
 dependencies = [
+ "cpio",
  "crosvm",
  "elf",
  "kv-conf",
