@@ -1,5 +1,6 @@
 // kmod_wrappers.rs
 use super::kmod_collector::ffi_bindings::*;
+use super::kmod_iterator::{KmodModuleListIter, SoftDependencies};
 use std::ffi::{CStr, CString};
 use std::ptr;
 
@@ -33,7 +34,7 @@ impl Drop for KmodContext {
 
 // --- KmodModule ---
 // object flow: created for each module we need to inspect (including dependencies).
-// ownership: owned by the collector.
+// ownership: owned by the collector or temporarily by the iterator.
 // lifetime: short-lived; exists just long enough to extract information or dependencies.
 // drop: calls kmod_module_unref() to decrease the reference count.
 pub struct KmodModule {
@@ -93,6 +94,62 @@ impl KmodModule {
             let state_str_ptr: *const i8 = unsafe { kmod_module_initstate_str(state) };
             Self::c_ptr_to_string(state_str_ptr)
         }
+    }
+
+    // hard_dependencies iterator.
+    pub fn hard_dependencies(&self) -> KmodModuleListIter {
+        let deps_list: *mut kmod_list = unsafe { kmod_module_get_dependencies(self.raw) };
+        KmodModuleListIter::new(deps_list)
+    }
+
+    // soft_dependencies iterator.
+    pub fn soft_dependencies(&self) -> Result<SoftDependencies, String> {
+        let mut pre_list: *mut kmod_list = ptr::null_mut();
+        let mut post_list: *mut kmod_list = ptr::null_mut();
+
+        let ret: i32 = unsafe {
+            // FFI call: populates pre_list and post_list
+            kmod_module_get_softdeps(self.raw, &mut pre_list, &mut post_list)
+        };
+
+        if ret < 0 {
+            // Crucial: If the FFI call fails, clean up any list that might have been allocated
+            if !pre_list.is_null() {
+                unsafe {
+                    kmod_module_unref_list(pre_list);
+                }
+            }
+            if !post_list.is_null() {
+                unsafe {
+                    kmod_module_unref_list(post_list);
+                }
+            }
+            return Err(format!(
+                "kmod_module_get_softdeps failed with code: {}",
+                ret
+            ));
+        }
+
+        Ok(SoftDependencies {
+            pre: KmodModuleListIter::new(pre_list),
+            post: KmodModuleListIter::new(post_list),
+        })
+    }
+
+    // weak_dependencies iterator.
+    pub fn weak_dependencies(&self) -> Result<KmodModuleListIter, String> {
+        let mut weak_list: *mut kmod_list = ptr::null_mut();
+
+        let ret = unsafe { kmod_module_get_weakdeps(self.raw, &mut weak_list) };
+
+        if ret < 0 {
+            return Err(format!(
+                "kmod_module_get_weakdeps failed with code: {}",
+                ret
+            ));
+        }
+
+        Ok(KmodModuleListIter::new(weak_list))
     }
 }
 
