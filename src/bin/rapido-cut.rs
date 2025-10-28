@@ -13,6 +13,8 @@ use elf::ElfStream;
 use elf::endian::AnyEndian;
 
 use crosvm::argument::{self, Argument};
+mod kmod;
+use kmod::kmod_collector::KmodCollector;
 
 // Don't print debug messages on release builds...
 #[cfg(debug_assertions)]
@@ -224,6 +226,7 @@ fn args_usage(params: &[Argument]) {
 
 fn args_process(
     inst: &mut Vec<(String, Option<String>)>,
+    kmods_out: &mut Vec<(String, Option<String>)>,
 ) -> argument::Result<PathBuf> {
     let params = &[
         Argument::positional("OUTPUT", "Write initramfs archive to this file path."),
@@ -231,6 +234,11 @@ fn args_process(
             "install",
             "FILES",
             "List of files to archive. Space separated with <src>→<dest> support."
+        ),
+        Argument::value(
+            "install-kmod",
+            "MODULES",
+            "space separated list of kernel modules to install with dependencies.",
         ),
         Argument::short_flag('h', "help", "Print help message."),
     ];
@@ -256,6 +264,19 @@ fn args_process(
                     };
                     inst.push(file_parsed);
                 }
+            }
+            "install-kmod" => {
+                let kmod_parsed: argument::Result<Vec<(String, Option<String>)>> = value
+                    .unwrap()
+                    .split(' ')
+                    .map(|f| {
+                        f.parse().map(|s| (s, None)).map_err(|_| argument::Error::InvalidValue {
+                            value: f.to_owned(),
+                            expected: String::from("MODULES must be utf-8 strings"),
+                        })
+                    })
+                    .collect();
+                kmods_out.append(&mut kmod_parsed?);
             }
             "help" => return Err(argument::Error::PrintHelp),
             _ => unreachable!(),
@@ -298,7 +319,7 @@ fn main() -> io::Result<()> {
     struct State {
         bins: Gather,
         libs: Gather,
-        // TODO: kmods: Gather,
+        kmods: Gather,
         // TODO: data: Gather,  // don't check for elf deps? or just rename "bins" to "files" and
     }
 
@@ -313,9 +334,14 @@ fn main() -> io::Result<()> {
             off: 0,
             missing: vec!(),
         },
+        kmods: Gather { 
+            names: vec!(),
+            off: 0,
+            missing: vec!(),
+        },
     };
 
-    let cpio_out_path = match args_process(&mut state.bins.names) {
+    let cpio_out_path = match args_process(&mut state.bins.names, &mut state.kmods.names) {
         Ok(p) => p,
         Err(argument::Error::PrintHelp) => return Ok(()),
         Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidInput, e.to_string())),
@@ -489,6 +515,33 @@ fn main() -> io::Result<()> {
             },
         };
         state.libs.off += 1;
+    }
+
+    // KmodCollector
+    match KmodCollector::new() {
+        Ok(collector) => match collector.collect_recursive_dependencies_paths(&state.kmods.names) {
+            Ok(kmod_paths) => {
+                for path in kmod_paths {
+                    let md = fs::symlink_metadata(&path)?;
+                    let archive_md = cpio::ArchiveMd::from(&cpio_state, &md)?;
+                    let kmod_f = fs::File::open(&path)?;
+                    cpio::archive_file(
+                        &mut cpio_state,
+                        &path,
+                        &archive_md,
+                        &kmod_f,
+                        &mut cpio_writer,
+                    )?;
+                    println!("archived kmod: {:?}", path);
+                }
+            }
+            Err(e) => {
+                dout!("Warning: Failed to collect kmod paths: {}", e);
+            }
+        },
+        Err(e) => {
+            dout!("Initialization Error: {}", e);
+        }
     }
 
     let len = cpio::archive_trailer(&mut cpio_state, &mut cpio_writer)?;
