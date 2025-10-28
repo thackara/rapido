@@ -9,15 +9,12 @@ version = "0.1.0"
 edition = "2018"
 default-run = "rapido-cut"
 
-[lib]
-name = "cpio"
-path = "src/cpio.rs"
-
 # non-lib source for binaries is carried under src/bin/
 
 [dependencies]
 # internal
 kv-conf = { path = "src/kv-conf" }
+cpio = { path = "src/cpio" }
 
 # minimal command line parameter passing
 crosvm = { path = "src/third_party/crosvm" }
