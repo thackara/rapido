@@ -85,14 +85,14 @@ fn vm_resource_line_process(line: &[u8], rscs: &mut VmResources) -> io::Result<(
         [b'r', b'a', b'p', b'i', b'd', b'o', b'-', b'r', b's', b'c', b'/',
          b'q', b'e', b'm', b'u', b'/',
          b'c', b'u', b's', b't', b'o', b'm', b'_', b'a', b'r', b'g', b's'] => {
-             // obsolete way for images to inject their own qemu params.
-             // cut scripts should instead assert that the args required are set.
-             eprintln!("ignoring qemu custom_args presence");
+            // obsolete way for images to inject their own qemu params.
+            // cut scripts should instead assert that the args required are set.
+            eprintln!("ignoring qemu custom_args presence");
         },
         // rapido-rsc/net
         [b'r', b'a', b'p', b'i', b'd', b'o', b'-', b'r', b's', b'c', b'/',
          b'n', b'e', b't'] => {
-             rscs.net = true;
+            rscs.net = true;
         },
         [ _unused @ .. ] => {},
     }
@@ -108,31 +108,26 @@ fn vm_resources_get(initramfs_img: &str) -> io::Result<VmResources> {
         net: false,
     };
 
-    // TODO extend cpio lib to list files and *seek* past data
-    let mut proc = process::Command::new("cpio")
-        .args(["--quiet", "--list", "rapido-rsc/*/*", "rapido-rsc/net"])
-        .stdin(process::Stdio::piped())
-        .stdout(process::Stdio::piped())
-        .spawn()
-        .expect("failed to execute process");
-    {
-        let f = fs::OpenOptions::new().read(true).open(&initramfs_img)?;
-        let mut reader = io::BufReader::new(f);
-        let mut stdin = proc.stdin.take().unwrap();
-        match io::copy(&mut reader, &mut stdin) {
-            Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
-                eprintln!("ignoring EPIPE while copying to cpio - concat archive?");
-            },
+    let f = fs::OpenOptions::new().read(true).open(&initramfs_img)?;
+    // BufReader I/O is ugly for archive_walk: read(8k) + seek(next_hdr_off)
+    // next_hdr_off is negative unless file len > 8k - (HDR_LEN + namesize)
+    let reader = io::BufReader::new(f);
+    let mut archive_walker = cpio::archive_walk(reader)?;
+    while let Some(archive_ent) = archive_walker.next() {
+        match archive_ent {
             Err(e) => {
-                eprintln!("failed to copy all data to cpio: {:?}", e);
+                eprintln!("archive traversal failed");
                 return Err(e);
             },
-            Ok(_) => {},
+            // TODO optimization: break loop when leaving rapido-rsc/ paths.
+            // rsc entries could then be placed at the start of the archive to
+            // minimise traversal.
+            Ok(ent) => vm_resource_line_process(
+                // namesize includes nul. cpio ensures 0< namesize < PATH_MAX+1
+                &ent.name[0 .. (ent.namesize as usize) - 1],
+                &mut rscs
+            )?,
         }
-    }
-    let output = proc.wait_with_output()?;
-    for line in output.stdout.split(|b| *b == b'\n') {
-        vm_resource_line_process(line, &mut rscs)?;
     }
 
     Ok(rscs)
