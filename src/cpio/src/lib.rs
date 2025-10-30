@@ -576,7 +576,7 @@ impl<R: Seek + BufRead> Iterator for ArchiveWalker<R> {
     type Item = io::Result<ArchiveEnt>;
     fn next(&mut self) -> Option<Self::Item> {
         let mut hdr_buf = [0u8; NEWC_HDR_LEN as usize];
-        // iter only returns none when we hit EOF while reading a hdr
+        // return None if we hit EOF while reading a hdr
         if let Err(e) = self.reader.read_exact(&mut hdr_buf) {
             return match e.kind() {
                 io::ErrorKind::UnexpectedEof => None,
@@ -603,7 +603,10 @@ impl<R: Seek + BufRead> Iterator for ArchiveWalker<R> {
                 if let Err(e) = self.reader.seek(io::SeekFrom::Current(seeklen)) {
                     return Some(Err(e));
                 }
-                // cpio trailer handled as any other entry.
+                if &buf[0 .. (namesize as usize) - 1] == b"TRAILER!!!" {
+                    // cpio trailer treated the same as EOF
+                    return None;
+                }
                 let ae = ArchiveEnt{
                     md,
                     namesize,
@@ -663,16 +666,7 @@ mod tests {
             }
         );
 
-        assert_eq!(
-            aw.next().unwrap().unwrap().name,
-            {
-                let mut buf = [0u8; (PATH_MAX + 1) as usize];
-                let mut fbuf = &mut buf[0 .. (PATH_MAX + 1) as usize];
-                fbuf.write_all("TRAILER!!!".as_bytes()).unwrap();
-                buf
-            }
-        );
-
+        // cpio trailer entry returns None
         assert!(aw.next().is_none());
     }
 
@@ -774,6 +768,7 @@ mod tests {
             }
         }
 
+        // no cpio trailer; EOF should result in None
         assert!(aw.next().is_none());
     }
 }
