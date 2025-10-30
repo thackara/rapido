@@ -563,7 +563,7 @@ fn archive_read_newc_md(hdr_md: &[u8]) -> io::Result<(ArchiveMd, u32)> {
         rminor: md_iter.next().unwrap()?,
     };
     let namesize = md_iter.next().unwrap()?;
-    if namesize > (PATH_MAX + 1) as u32 {
+    if namesize == 0 || namesize > (PATH_MAX + 1) as u32 {
         return Err(
             io::Error::new(io::ErrorKind::InvalidFilename, "invalid namesize")
         );
