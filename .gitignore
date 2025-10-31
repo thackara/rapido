@@ -5,3 +5,4 @@ initrds/myinitrd
 *~
 *.pid
 initrds/
+target/
