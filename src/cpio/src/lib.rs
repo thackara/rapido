@@ -193,22 +193,8 @@ impl ArchiveMd {
     }
 }
 
-pub fn archive_path<W: Seek + Write>(
-    state: &mut ArchiveState,
-    path: &Path,
-    md: &ArchiveMd,
-    mut writer: W,
-) -> io::Result<()> {
-    let mut outpath = path;
-
-    if md.mode & S_IFMT == S_IFREG || md.mode & S_IFMT == S_IFLNK {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "archive_path does not support files or symlinks",
-        ));
-    }
-
-    outpath = match outpath.strip_prefix("./") {
+fn path_trim_prefixes(outpath: &Path) -> &Path {
+    match outpath.strip_prefix("./") {
         Ok(p) => {
             if p.as_os_str().as_bytes().len() == 0 {
                 outpath // retain './' and '.' paths
@@ -217,7 +203,24 @@ pub fn archive_path<W: Seek + Write>(
             }
         }
         Err(_) => outpath,
-    };
+    }
+}
+
+pub fn archive_path<W: Seek + Write>(
+    state: &mut ArchiveState,
+    path: &Path,
+    md: &ArchiveMd,
+    mut writer: W,
+) -> io::Result<()> {
+    let outpath = path_trim_prefixes(path);
+
+    if md.mode & S_IFMT == S_IFREG || md.mode & S_IFMT == S_IFLNK {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "archive_path does not support files or symlinks",
+        ));
+    }
+
     let fname = outpath.as_os_str().as_bytes();
     if fname.len() + 1 >= PATH_MAX.try_into().unwrap() {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "path too long"));
@@ -271,7 +274,7 @@ pub fn archive_symlink<W: Seek + Write>(
     symlink_tgt: &Path,
     mut writer: W,
 ) -> io::Result<()> {
-    let mut outpath = path;
+    let outpath = path_trim_prefixes(path);
     let tgt_bytes = symlink_tgt.as_os_str().as_bytes();
     let datalen: u32 = {
         let d: usize = tgt_bytes.len();
@@ -289,16 +292,6 @@ pub fn archive_symlink<W: Seek + Write>(
         return Err(io::Error::from(io::ErrorKind::InvalidInput));
     }
 
-    outpath = match outpath.strip_prefix("./") {
-        Ok(p) => {
-            if p.as_os_str().as_bytes().len() == 0 {
-                outpath // retain './' and '.' paths
-            } else {
-                p
-            }
-        }
-        Err(_) => outpath,
-    };
     let fname = outpath.as_os_str().as_bytes();
     if fname.len() + 1 >= PATH_MAX.try_into().unwrap() {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "path too long"));
@@ -358,23 +351,13 @@ pub fn archive_file<W: Seek + Write>(
     in_file: &fs::File,
     mut writer: W,
 ) -> io::Result<()> {
-    let mut outpath = path;
+    let outpath = path_trim_prefixes(path);
     let mut data_align_seek: u32 = 0;
 
     if md.mode & S_IFMT != S_IFREG {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a file"));
     }
 
-    outpath = match outpath.strip_prefix("./") {
-        Ok(p) => {
-            if p.as_os_str().as_bytes().len() == 0 {
-                outpath // retain './' and '.' paths
-            } else {
-                p
-            }
-        }
-        Err(_) => outpath,
-    };
     let fname = outpath.as_os_str().as_bytes();
     if fname.len() + 1 >= PATH_MAX.try_into().unwrap() {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "path too long"));
@@ -770,5 +753,11 @@ mod tests {
 
         // no cpio trailer; EOF should result in None
         assert!(aw.next().is_none());
+    }
+
+    #[test]
+    fn test_archive_path_trim() {
+        assert_eq!(Path::new("hello"), path_trim_prefixes(Path::new("hello")));
+        assert_eq!(Path::new("hello"), path_trim_prefixes(Path::new("./hello")));
     }
 }
