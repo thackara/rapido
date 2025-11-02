@@ -193,17 +193,35 @@ impl ArchiveMd {
     }
 }
 
-fn path_trim_prefixes(outpath: &Path) -> &Path {
-    match outpath.strip_prefix("./") {
+fn path_trim_prefixes(path: &Path) -> io::Result<&[u8]> {
+    let outpath = match path.strip_prefix("/") {
         Ok(p) => {
             if p.as_os_str().as_bytes().len() == 0 {
-                outpath // retain './' and '.' paths
+                path // retain '/'
             } else {
                 p
             }
         }
-        Err(_) => outpath,
+        Err(_) => path,
+    };
+
+    let fname = match outpath.strip_prefix("./") {
+        Ok(p) => {
+            let out = p.as_os_str().as_bytes();
+            if out.len() == 0 {
+                outpath.as_os_str().as_bytes() // retain './' and '.' paths
+            } else {
+                out
+            }
+        }
+        Err(_) => outpath.as_os_str().as_bytes(),
+    };
+
+    if fname.len() + 1 >= PATH_MAX.try_into().unwrap() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "path too long"));
     }
+
+    Ok(fname)
 }
 
 pub fn archive_path<W: Seek + Write>(
@@ -212,7 +230,7 @@ pub fn archive_path<W: Seek + Write>(
     md: &ArchiveMd,
     mut writer: W,
 ) -> io::Result<()> {
-    let outpath = path_trim_prefixes(path);
+    let fname = path_trim_prefixes(path)?;
 
     if md.mode & S_IFMT == S_IFREG || md.mode & S_IFMT == S_IFLNK {
         return Err(io::Error::new(
@@ -221,12 +239,7 @@ pub fn archive_path<W: Seek + Write>(
         ));
     }
 
-    let fname = outpath.as_os_str().as_bytes();
-    if fname.len() + 1 >= PATH_MAX.try_into().unwrap() {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "path too long"));
-    }
-
-    dout!("archiving {} with mode {:o}", outpath.display(), md.mode);
+    dout!("archiving {} with mode {:o}", path.display(), md.mode);
 
     write!(
         writer,
@@ -274,7 +287,7 @@ pub fn archive_symlink<W: Seek + Write>(
     symlink_tgt: &Path,
     mut writer: W,
 ) -> io::Result<()> {
-    let outpath = path_trim_prefixes(path);
+    let fname = path_trim_prefixes(path)?;
     let tgt_bytes = symlink_tgt.as_os_str().as_bytes();
     let datalen: u32 = {
         let d: usize = tgt_bytes.len();
@@ -292,12 +305,7 @@ pub fn archive_symlink<W: Seek + Write>(
         return Err(io::Error::from(io::ErrorKind::InvalidInput));
     }
 
-    let fname = outpath.as_os_str().as_bytes();
-    if fname.len() + 1 >= PATH_MAX.try_into().unwrap() {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "path too long"));
-    }
-
-    dout!("archiving {} with mode {:o}", outpath.display(), md.mode);
+    dout!("archiving {} with mode {:o}", path.display(), md.mode);
 
     write!(
         writer,
@@ -351,19 +359,14 @@ pub fn archive_file<W: Seek + Write>(
     in_file: &fs::File,
     mut writer: W,
 ) -> io::Result<()> {
-    let outpath = path_trim_prefixes(path);
+    let fname = path_trim_prefixes(path)?;
     let mut data_align_seek: u32 = 0;
 
     if md.mode & S_IFMT != S_IFREG {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a file"));
     }
 
-    let fname = outpath.as_os_str().as_bytes();
-    if fname.len() + 1 >= PATH_MAX.try_into().unwrap() {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "path too long"));
-    }
-
-    dout!("archiving file {} with mode {:o}", outpath.display(), md.mode);
+    dout!("archiving file {} with mode {:o}", path.display(), md.mode);
 
     if state.props.data_align > 0 && md.len > state.props.data_align {
         // XXX we're "bending" the newc spec a bit here to inject zeros
@@ -381,7 +384,7 @@ pub fn archive_file<W: Seek + Write>(
             if padded_namesize > u64::from(state.props.namesize_max) {
                 dout!(
                     "{} misaligned. Required padding {} exceeds namesize maximum {}.",
-                    outpath.display(),
+                    path.display(),
                     len,
                     state.props.namesize_max
                 );
@@ -757,7 +760,20 @@ mod tests {
 
     #[test]
     fn test_archive_path_trim() {
-        assert_eq!(Path::new("hello"), path_trim_prefixes(Path::new("hello")));
-        assert_eq!(Path::new("hello"), path_trim_prefixes(Path::new("./hello")));
+        assert_eq!(
+            b"hello",
+            path_trim_prefixes(Path::new("hello")).unwrap()
+        );
+        assert_eq!(
+            b"hello",
+            path_trim_prefixes(Path::new("./hello")).unwrap()
+        );
+        assert_eq!(
+            b"hello",
+            path_trim_prefixes(Path::new("//hello")).unwrap()
+        );
+        assert_eq!(b"/", path_trim_prefixes(Path::new("/")).unwrap());
+        // should prob return a single '/' for this...
+        assert_eq!(b"//", path_trim_prefixes(Path::new("//")).unwrap());
     }
 }
