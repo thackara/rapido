@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: (GPL-2.0 OR GPL-3.0)
 // Copyright (C) 2025 SUSE S.A.
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::{self, BufRead, BufReader};
+use std::path::Path;
 use std::path::PathBuf;
 
 // --- Module Data Structures ---
@@ -31,6 +34,27 @@ pub struct KmodContext {
     pub module_root: PathBuf,
 }
 
+fn read_lines<P: AsRef<Path>>(filename: P) -> io::Result<io::Lines<BufReader<File>>> {
+    let file = File::open(filename)?;
+    Ok(BufReader::new(file).lines())
+}
+
+// extract: from _path: 'kernel/sub/module.ko{.xz,.zst,.gz}' -> name: 'module'
+fn extract_module_name(path_str: &str) -> String {
+    let path = PathBuf::from(path_str);
+    // file_stem: 'kernel/sub/module.ko{.xz,.zst,.gz}' -> file_stem: 'module{.ko}'
+    let file_stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path_str);
+
+    // file_stem_strip_suffix: 'module{.ko}' -> name: 'module'
+    let base_name = file_stem.strip_suffix(".ko").unwrap_or(file_stem);
+    // aligns with libkmod: 'kmod_module_get_name' logic.
+    // name is always normalized (dashes are replaced with underscores).
+    base_name.replace('-', "_")
+}
+
 impl KmodContext {
     pub fn new(dirname: Option<&str>) -> Result<Self, String> {
         let module_root: PathBuf = match dirname {
@@ -42,7 +66,7 @@ impl KmodContext {
             }
         };
 
-        let ctx = KmodContext {
+        let mut ctx = KmodContext {
             modules_hash: HashMap::new(),
             alias_map: HashMap::new(),
             module_root: module_root,
@@ -53,7 +77,61 @@ impl KmodContext {
             ctx.module_root.display()
         );
 
+        // load modules.dep
+        ctx.load_hard_dependencies()
+            .map_err(|e| format!("Failed to load modules.dep: {}", e))?;
+
         Ok(ctx)
+    }
+
+    // Parses **modules.dep** (hard dependencies and module paths).
+    fn load_hard_dependencies(&mut self) -> io::Result<()> {
+        let path = self.module_root.join("modules.dep");
+        if !path.exists() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("modules.dep not found at path: {}", path.display()),
+            ));
+        }
+
+        for line in read_lines(&path)? {
+            let line = line?;
+            let parts: Vec<&str> = line.splitn(2, ':').collect();
+            if parts.len() != 2 {
+                continue;
+            }
+
+            let module_path_str = parts[0].trim();
+            let module_name = extract_module_name(module_path_str);
+
+            // Collect dependency names
+            let dep_names: Vec<String> = parts[1]
+                .trim()
+                .split_whitespace()
+                .map(|p| extract_module_name(p))
+                .collect();
+
+            // Insert or update module
+            let full_path = self.module_root.join(module_path_str);
+            let module = self
+                .modules_hash
+                .entry(module_name.clone())
+                .or_insert_with(|| KmodModule {
+                    name: module_name,
+                    status: ModuleStatus::LoadableModule,
+                    path: full_path.clone(),
+                    hard_deps: Vec::new(),
+                    soft_deps_pre: Vec::new(),
+                    soft_deps_post: Vec::new(),
+                    weak_deps: Vec::new(),
+                });
+
+            module.path = full_path;
+            module.hard_deps = dep_names;
+            module.status = ModuleStatus::LoadableModule;
+        }
+
+        Ok(())
     }
 }
 
@@ -78,10 +156,28 @@ mod tests {
         }
     }
 
+    fn write_test_file(base_path: &Path, filename: &str, content: &str) -> PathBuf {
+        let path = base_path.join(filename);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&path, content).unwrap();
+        path
+    }
+
+    fn set_context(root_path: &Path) -> KmodContext {
+        KmodContext {
+            modules_hash: HashMap::new(),
+            alias_map: HashMap::new(),
+            module_root: root_path.to_path_buf(),
+        }
+    }
+
     #[test]
     fn test_new_with_valid_dir() {
         let root_path = setup_test_dir("test_new_success");
         let root_dir_str = root_path.to_str().unwrap();
+        write_test_file(&root_path, "modules.dep", "");
 
         match KmodContext::new(Some(root_dir_str)) {
             Ok(context) => {
@@ -105,5 +201,81 @@ mod tests {
             }
             Ok(_) => panic!("KmodContext::new should have failed when dirname is None"),
         }
+    }
+
+    #[test]
+    fn test_kmod_context_new_error() {
+        let root_path = setup_test_dir("missing_dep_dir");
+        let root_dir_str = root_path.to_str().unwrap();
+        // modules.*dep is missing (first hit load_hard_dependencies)
+        match KmodContext::new(Some(root_dir_str)) {
+            Ok(_) => panic!("Context should fail because modules.dep is missing"),
+            Err(e) => assert!(e.contains("modules.dep not found")),
+        }
+        cleanup_test_dir(&root_path);
+    }
+
+    #[test]
+    fn test_extract_module_name() {
+        // direct case
+        assert_eq!(
+            extract_module_name("drivers/sub1/sub2/sub3/module_name.ko.zst"),
+            "module_name"
+        );
+        // different compression extensions
+        assert_eq!(
+            extract_module_name("drivers/sub1/sub2/sub3/module_name.ko.xz"),
+            "module_name"
+        );
+        assert_eq!(
+            extract_module_name("drivers/sub1/sub2/sub3/module_name.ko.zst"),
+            "module_name"
+        );
+        // normalization
+        assert_eq!(
+            extract_module_name("drivers/sub1/sub2/sub3/module-name.ko.zst"),
+            "module_name"
+        );
+        // No path and .ko suffix
+        assert_eq!(extract_module_name("module_name"), "module_name");
+        // full path provided
+        assert_eq!(
+            extract_module_name("/lib/modules/x.y.z/drivers/sub1/sub2/sub3/module-name.ko.zst"),
+            "module_name"
+        );
+    }
+
+    #[test]
+    fn test_load_harddeps() {
+        let root_path = setup_test_dir("harddeps");
+        let mut ctx = set_context(&root_path);
+
+        // define modules and hard dependencies
+        let modules_dep_content = format!(
+            "kernel/mod_a.ko: kernel/dep1.ko kernel/dep2.ko.xz\n\
+             kernel/mod-b.ko:\n" // mod-b => mod_b
+        );
+        write_test_file(&root_path, "modules.dep", &modules_dep_content);
+        write_test_file(&root_path, "kernel/dep1.ko", "");
+
+        ctx.load_hard_dependencies().unwrap();
+
+        // Check mod_a
+        let mod_a = ctx.modules_hash.get("mod_a").expect("mod_a not found");
+        assert_eq!(mod_a.status, ModuleStatus::LoadableModule);
+        assert!(mod_a.path.ends_with("kernel/mod_a.ko"));
+        assert_eq!(
+            mod_a.hard_deps,
+            vec!["dep1", "dep2"],
+            "Hard deps for mod_a incorrect"
+        );
+
+        // Check mod_b (normalization and no deps)
+        let mod_b = ctx.modules_hash.get("mod_b").expect("mod_b not found");
+        assert_eq!(mod_b.status, ModuleStatus::LoadableModule);
+        assert!(mod_b.path.ends_with("kernel/mod-b.ko"));
+        assert!(mod_b.hard_deps.is_empty(), "mod_b should have no hard deps");
+
+        cleanup_test_dir(&root_path);
     }
 }
