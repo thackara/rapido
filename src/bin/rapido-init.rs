@@ -268,7 +268,6 @@ fn init_network(kcli_args: &KcliArgs) -> io::Result<()> {
 
     let mut udevadm_args = vec!(OsString::from("trigger"));
     udevadm_args.append(&mut entries);
-    eprintln!("running udevadm {:?}", udevadm_args);
     let status = Command::new("udevadm")
         .args(udevadm_args)
         .status()
@@ -330,6 +329,7 @@ fn init_shell(hostname: String) -> io::Result<()> {
             eprintln!("bash error {:?}", e);
             return Err(io::Error::from(io::ErrorKind::BrokenPipe));
         },
+        Ok(status) if status.success() => {},
         Ok(status) => eprintln!("bash ended with status {}", status),
     }
     Ok(())
