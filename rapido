@@ -21,13 +21,14 @@ rapido_setup_network()
 # vm is an alias for boot
 rapido_vm()
 {
-	${RAPIDO_DIR}/vm.sh
+	rapido_boot
 }
 
 short_help["boot"]="Boot previously prepared test"
 rapido_boot()
 {
-	${RAPIDO_DIR}/vm.sh
+	"${RAPIDO_DIR}/target/release/rapido-vm"
+	# check whether src is newer than bin?
 }
 
 cut_usage()
@@ -98,7 +99,7 @@ rapido_cut()
 	local cut_status=$?
 	[ $cut_status -ne 0 ] && exit $cut_status
 	[ -n "$boot_img" ] || exit 0
-	"${RAPIDO_DIR}/vm.sh"
+	rapido_boot
 }
 
 short_help["list"]="List testcases"
