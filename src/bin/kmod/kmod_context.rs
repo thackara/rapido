@@ -81,6 +81,10 @@ impl KmodContext {
         ctx.load_hard_dependencies()
             .map_err(|e| format!("Failed to load modules.dep: {}", e))?;
 
+        // load modules.softdep
+        ctx.load_soft_dependencies()
+            .map_err(|e| format!("Failed to load modules.softdep: {}", e))?;
+
         Ok(ctx)
     }
 
@@ -133,6 +137,43 @@ impl KmodContext {
 
         Ok(())
     }
+
+    // Parses **modules.softdep**
+    fn load_soft_dependencies(&mut self) -> io::Result<()> {
+        let path = self.module_root.join("modules.softdep");
+        if !path.exists() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("modules.softdep not found at path: {}", path.display()),
+            ));
+        }
+
+        for line in read_lines(&path)? {
+            let line = line?;
+            // softdep mod_name pre: pre_mod1 pre_mod2 post: post_mod1
+            let parts: Vec<&str> = line.split_whitespace().collect();
+
+            if parts.len() < 3 || parts[0] != "softdep" {
+                continue;
+            }
+
+            let module_name = parts[1].to_string();
+
+            if let Some(module) = self.modules_hash.get_mut(&module_name) {
+                let mut current_list = &mut module.soft_deps_pre;
+
+                for &part in parts.iter().skip(2) {
+                    match part {
+                        "pre:" => current_list = &mut module.soft_deps_pre,
+                        "post:" => current_list = &mut module.soft_deps_post,
+                        _ => current_list.push(part.to_string()),
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -178,6 +219,7 @@ mod tests {
         let root_path = setup_test_dir("test_new_success");
         let root_dir_str = root_path.to_str().unwrap();
         write_test_file(&root_path, "modules.dep", "");
+        write_test_file(&root_path, "modules.softdep", "");
 
         match KmodContext::new(Some(root_dir_str)) {
             Ok(context) => {
@@ -275,6 +317,53 @@ mod tests {
         assert_eq!(mod_b.status, ModuleStatus::LoadableModule);
         assert!(mod_b.path.ends_with("kernel/mod-b.ko"));
         assert!(mod_b.hard_deps.is_empty(), "mod_b should have no hard deps");
+
+        cleanup_test_dir(&root_path);
+    }
+
+    #[test]
+    fn test_load_softdeps() {
+        let root_path = setup_test_dir("softdeps");
+        let mut ctx = set_context(&root_path);
+
+        // setup KmodContext with the KmodModule(direct|harddep) that will receive softdeps
+        ctx.modules_hash.insert(
+            "mod_a".to_string(),
+            KmodModule {
+                name: "mod_a".to_string(),
+                status: ModuleStatus::LoadableModule,
+                path: PathBuf::new(),
+                hard_deps: Vec::new(),
+                soft_deps_pre: Vec::new(),
+                soft_deps_post: Vec::new(),
+                weak_deps: Vec::new(),
+            },
+        );
+
+        // Define soft dependencies
+        let modules_softdep_content = format!(
+            "softdep mod_a pre: softdep_pre_1 softdep_pre_2 post: softdep_post_1\n\
+             softdep mod_b pre: softdep_b_pre post: softdep_b_post\n" // mod_b should be None as it's not setup with KmodModule
+        );
+        write_test_file(&root_path, "modules.softdep", &modules_softdep_content);
+
+        ctx.load_soft_dependencies().unwrap();
+
+        // Check mod_a
+        let mod_a = ctx.modules_hash.get("mod_a").expect("mod_a not found");
+        assert_eq!(
+            mod_a.soft_deps_pre,
+            vec!["softdep_pre_1", "softdep_pre_2"],
+            "Soft pre-deps incorrect"
+        );
+        assert_eq!(
+            mod_a.soft_deps_post,
+            vec!["softdep_post_1"],
+            "Soft post-deps incorrect"
+        );
+
+        // check that mod_b is None (as it was not setup with KmodModule struct)
+        assert!(ctx.modules_hash.get("mod_b").is_none());
 
         cleanup_test_dir(&root_path);
     }
