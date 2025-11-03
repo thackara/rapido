@@ -269,7 +269,7 @@ mod tests {
     use std::cmp;
     use std::os::unix::fs as unixfs;
     use std::os::unix::fs::MetadataExt;
-    use std::path::PathBuf;
+    use std::path::{self, PathBuf};
     use std::process::{Command, Stdio};
 
     pub static TEST_LOCK: std::sync::Mutex<u32> = std::sync::Mutex::new(0);
@@ -494,32 +494,6 @@ mod tests {
     }
 
     #[test]
-    fn test_archive_absolute_path() {
-        let mut twd = TempWorkDir::new();
-        twd.create_tmp_file("file.txt", 0);
-
-        let canon_path = fs::canonicalize("file.txt").unwrap();
-        let mut canon_file_list = canon_path.into_os_string();
-        canon_file_list.push("\n");
-
-        gnu_cpio_create(canon_file_list.as_bytes(), "gnu.cpio");
-        twd.cleanup_files.push(PathBuf::from("gnu.cpio"));
-
-        let f = fs::File::create("dracut.cpio").unwrap();
-        let mut writer = io::BufWriter::new(f);
-        let mut reader = io::BufReader::new(canon_file_list.as_bytes());
-        let wrote = archive_loop(&mut reader, &mut writer, &cpio::ArchiveProperties::default()).unwrap();
-        twd.cleanup_files.push(PathBuf::from("dracut.cpio"));
-        assert_eq!(wrote, 512);
-
-        let status = Command::new("diff")
-            .args(&["gnu.cpio", "dracut.cpio"])
-            .status()
-            .expect("diff failed to start");
-        assert!(status.success());
-    }
-
-    #[test]
     fn test_archive_dir() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_dir("dir");
@@ -664,16 +638,24 @@ mod tests {
     fn test_archive_char() {
         let mut twd = TempWorkDir::new();
 
-        gnu_cpio_create("/dev/zero\n".as_bytes(), "gnu.cpio");
-        twd.cleanup_files.push(PathBuf::from("gnu.cpio"));
+        let gout = path::absolute("gnu.cpio").unwrap();
+        let drout = path::absolute("dracut.cpio").unwrap();
 
-        let f = fs::File::create("dracut.cpio").unwrap();
+        // cpio.rs now strips '/' prefixes, so cd to root for 'dev/zero'
+        // twd Drop will bring us back to the original working directory.
+        env::set_current_dir("/").unwrap();
+
+        gnu_cpio_create("dev/zero\n".as_bytes(), gout.to_str().unwrap());
+        twd.cleanup_files.push(gout);
+
+        let f = fs::File::create(&drout).unwrap();
         let mut writer = io::BufWriter::new(f);
-        let mut reader = io::BufReader::new("/dev/zero\n".as_bytes());
+        let mut reader = io::Cursor::new("/dev/zero\n".as_bytes());
         let wrote = archive_loop(&mut reader, &mut writer, &cpio::ArchiveProperties::default()).unwrap();
-        twd.cleanup_files.push(PathBuf::from("dracut.cpio"));
+        twd.cleanup_files.push(drout);
         assert_eq!(wrote, 512);
 
+        env::set_current_dir(&twd.parent_tmp_dir).unwrap();
         let status = Command::new("diff")
             .args(&["gnu.cpio", "dracut.cpio"])
             .status()
@@ -1155,7 +1137,8 @@ mod tests {
     fn test_archive_major_minor() {
         let mut twd = TempWorkDir::new();
         twd.create_tmp_file("file1", 0);
-        let twd_md = fs::symlink_metadata(PathBuf::from("file1")).unwrap();
+        let fin = path::absolute("file1").unwrap();
+        let twd_md = fs::symlink_metadata(&fin).unwrap();
 
         let slash_tmp_md = match fs::symlink_metadata(PathBuf::from("/tmp")) {
             Err(_) => {
@@ -1169,23 +1152,35 @@ mod tests {
             println!("SKIPPED: this test requires a unique /tmp device ID");
             return;
         }
-        let file_list: &str = "file1\n/tmp\n";
 
-        gnu_cpio_create(file_list.as_bytes(), "gnu.cpio");
-        twd.cleanup_files.push(PathBuf::from("gnu.cpio"));
+        let gout = path::absolute("gnu.cpio").unwrap();
+        let drout = path::absolute("dracut.cpio").unwrap();
 
-        let f = fs::File::create("dracut.cpio").unwrap();
+        // cpio.rs now strips '/' prefixes, so cd to root and use stripped path
+        // for GNU. twd Drop brings us back to the original working directory.
+        env::set_current_dir("/").unwrap();
+
+        let file_list = format!(
+            "{}\ntmp\n",
+            fin.strip_prefix("/").unwrap().to_str().unwrap()
+        );
+
+        gnu_cpio_create(file_list.as_bytes(), gout.to_str().unwrap());
+        twd.cleanup_files.push(gout);
+
+        let f = fs::File::create(&drout).unwrap();
         let mut writer = io::BufWriter::new(f);
-        let mut reader = io::BufReader::new(file_list.as_bytes());
+        let mut reader = io::Cursor::new(file_list.as_bytes());
         let wrote = archive_loop(
             &mut reader,
             &mut writer,
             &cpio::ArchiveProperties::default()
         )
         .unwrap();
-        twd.cleanup_files.push(PathBuf::from("dracut.cpio"));
+        twd.cleanup_files.push(drout);
         assert!(wrote > cpio::NEWC_HDR_LEN);
 
+        env::set_current_dir(&twd.parent_tmp_dir).unwrap();
         let status = Command::new("diff")
             .args(&["gnu.cpio", "dracut.cpio"])
             .status()
