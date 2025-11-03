@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: (GPL-2.0 OR GPL-3.0)
 // Copyright (C) 2025 SUSE LLC
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::env;
 use std::fs;
@@ -13,6 +13,9 @@ use elf::ElfStream;
 use elf::endian::AnyEndian;
 
 use crosvm::argument::{self, Argument};
+mod kmod;
+use kmod::kmod_context::{KmodContext, ModuleStatus};
+extern crate kv_conf;
 
 // Don't print debug messages on release builds...
 #[cfg(debug_assertions)]
@@ -218,12 +221,48 @@ fn gather_archive_file<W: Seek + Write>(
     Ok(())
 }
 
+fn archive_kmod_path<W: Seek + Write>(
+    src: &Path,
+    dst: &Path,
+    cpio_state: &mut cpio::ArchiveState,
+    cpio_writer: W,
+) -> io::Result<()> {
+    let md = fs::symlink_metadata(src)?;
+    let archive_md = cpio::ArchiveMd::from(cpio_state, &md)?;
+    let kmod_f = fs::File::open(src)?;
+    cpio::archive_file(
+        cpio_state,
+        dst,
+        &archive_md,
+        &kmod_f,
+        cpio_writer,
+    )?;
+    println!("archived kmod: {:?} -> {:?}", src, dst);
+    Ok(())
+}
+
+// Linux version 6.17.0-2-default ...
+fn get_host_rel(kvers: &[u8]) -> io::Result<&str> {
+
+    match str::from_utf8(kvers) {
+        Err(_) => Err(io::Error::from(io::ErrorKind::InvalidData)),
+        Ok(s) => match s.strip_prefix("Linux version ") {
+            None => Err(io::Error::from(io::ErrorKind::InvalidData)),
+            Some(rel) => match rel.split_once([' ']) {
+                Some((rel, _)) => Ok(rel),
+                None => Err(io::Error::from(io::ErrorKind::InvalidData)),
+            },
+        },
+    }
+}
+
 fn args_usage(params: &[Argument]) {
     argument::print_help("rapido-cut", "OUTPUT", params);
 }
 
 fn args_process(
     inst: &mut Vec<(String, Option<String>)>,
+    kmods_out: &mut Vec<(String, Option<String>)>,
 ) -> argument::Result<PathBuf> {
     let params = &[
         Argument::positional("OUTPUT", "Write initramfs archive to this file path."),
@@ -231,6 +270,11 @@ fn args_process(
             "install",
             "FILES",
             "List of files to archive. Space separated with <src>→<dest> support."
+        ),
+        Argument::value(
+            "install-kmod",
+            "MODULES",
+            "space separated list of kernel modules to install with dependencies.",
         ),
         Argument::short_flag('h', "help", "Print help message."),
     ];
@@ -256,6 +300,19 @@ fn args_process(
                     };
                     inst.push(file_parsed);
                 }
+            }
+            "install-kmod" => {
+                let kmod_parsed: argument::Result<Vec<(String, Option<String>)>> = value
+                    .unwrap()
+                    .split(' ')
+                    .map(|f| {
+                        f.parse().map(|s| (s, None)).map_err(|_| argument::Error::InvalidValue {
+                            value: f.to_owned(),
+                            expected: String::from("MODULES must be utf-8 strings"),
+                        })
+                    })
+                    .collect();
+                kmods_out.append(&mut kmod_parsed?);
             }
             "help" => return Err(argument::Error::PrintHelp),
             _ => unreachable!(),
@@ -298,7 +355,7 @@ fn main() -> io::Result<()> {
     struct State {
         bins: Gather,
         libs: Gather,
-        // TODO: kmods: Gather,
+        kmods: Gather,
         // TODO: data: Gather,  // don't check for elf deps? or just rename "bins" to "files" and
     }
 
@@ -313,9 +370,59 @@ fn main() -> io::Result<()> {
             off: 0,
             missing: vec!(),
         },
+        kmods: Gather {
+            names: vec!(),
+            off: 0,
+            missing: vec!(),
+        },
     };
 
-    let cpio_out_path = match args_process(&mut state.bins.names) {
+    // read: kv-conf with rapido_conf
+    // FIXME: prepare RapidoConf parser(based on kv-conf)
+    // kmod-parser:
+    //      kmod_dir: for src_path, derived from KERNEL_INSTALL_MOD_PATH,
+    //                  or default to /lib/modules/kver
+    //      kver: for dst_path inside initrd
+
+    let rapido_conf_path = "rapido.conf"; // FIXME: assuming cwd, use env::RAPIDO_CONF or RapidoConf parser
+
+    let conf = match fs::File::open(rapido_conf_path) {
+        Ok(f) => {
+            let mut reader = io::BufReader::new(f);
+            match kv_conf::kv_conf_process(&mut reader) {
+                Ok(c) => c,
+                Err(e) => {
+                    println!("failed to process {}: {:?}", rapido_conf_path, e);
+                    return Err(e);
+                }
+            }
+        }
+        // handle no rapido.conf
+        Err(_) => HashMap::new(),
+    };
+    // get kver, will be replaced by lib call to get_kver later
+    let kver: String = match conf.get("KERNEL_RELEASE") {
+        Some(rel) => rel.clone(),
+        None => {
+            let proc_version = fs::read("/proc/version")?;
+            let rel_slice = get_host_rel(&proc_version)?;
+            rel_slice.to_string()
+        }
+    };
+    let kver_path = format!("/lib/modules/{kver}");
+
+    // get kmod_dir, falling back to /lib/modules/<kver>
+    let kmod_dir: String = match conf.get("KERNEL_INSTALL_MOD_PATH") {
+        Some(kmod) => kmod.clone(),
+        None => {
+            let proc_version = fs::read("/proc/version")?;
+            let rel_slice = get_host_rel(&proc_version)?;
+            format!("/lib/modules/{rel_slice}")
+        }
+    };
+    //
+
+    let cpio_out_path = match args_process(&mut state.bins.names, &mut state.kmods.names) {
         Ok(p) => p,
         Err(argument::Error::PrintHelp) => return Ok(()),
         Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidInput, e.to_string())),
@@ -489,6 +596,65 @@ fn main() -> io::Result<()> {
             },
         };
         state.libs.off += 1;
+    }
+
+    // KmodContext initialization and usage
+    // src: replace with kv-conf KERNEL_INSTALL_MOD_PATH value
+    // dst: inside initrd it will /lib/modules/{kver}/module.path
+    match KmodContext::new(Some(kmod_dir.as_str())) {
+        Ok(context) => {
+            let module_names: Vec<String> = state
+                .kmods
+                .names
+                .iter()
+                .map(|(name, _dst)| name.clone())
+                .collect();
+            let mut kmod_paths: HashSet<PathBuf> = HashSet::new();
+            let kmod_root_path = Path::new(&kmod_dir);
+            let kver_root_path = Path::new(&kver_path);
+
+            for name in module_names {
+                if let Some(root_mod) = context.find(&name) {
+                    if root_mod.status != ModuleStatus::Builtin {
+                        if root_mod.path.exists() {
+                            kmod_paths.insert(root_mod.path.clone());
+                        }
+                        let all_deps: Vec<&String> = root_mod
+                            .hard_deps
+                            .iter()
+                            .chain(root_mod.soft_deps_pre.iter())
+                            .chain(root_mod.soft_deps_post.iter())
+                            .chain(root_mod.weak_deps.iter())
+                            .collect();
+                        for dep_mod_name in all_deps {
+                            if let Some(dep_mod) = context.find(dep_mod_name) {
+                                if dep_mod.path.exists() {
+                                    kmod_paths.insert(dep_mod.path.clone());
+                                }
+                            }
+                        }
+                    } else {
+                        dout!("{} builtin", root_mod.name);
+                    }
+                } else {
+                    dout!("{} Module Not Found", name);
+                }
+            }
+            for path in kmod_paths {
+                let relative_path = match path.strip_prefix(kmod_root_path) {
+                    Ok(rel_path) => rel_path,
+                    Err(_) => {
+                        dout!("Error: Path structure mismatch.");
+                        continue;
+                    }
+                };
+                let dst_path = kver_root_path.join(relative_path);
+                archive_kmod_path(&path, &dst_path, &mut cpio_state, &mut cpio_writer)?;
+            }
+        }
+        Err(e) => {
+            dout!("KmodContext Initialization Error: {}", e);
+        }
     }
 
     let len = cpio::archive_trailer(&mut cpio_state, &mut cpio_writer)?;
