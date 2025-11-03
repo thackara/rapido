@@ -85,6 +85,14 @@ impl KmodContext {
         ctx.load_soft_dependencies()
             .map_err(|e| format!("Failed to load modules.softdep: {}", e))?;
 
+        // load modules.weakdep
+        ctx.load_weak_dependencies()
+            .map_err(|e| format!("Failed to load modules.weakdep: {}", e))?;
+
+        // load modules.builtin
+        ctx.load_builtin_modules()
+            .map_err(|e| format!("Failed to load modules.builtin: {}", e))?;
+
         Ok(ctx)
     }
 
@@ -174,6 +182,78 @@ impl KmodContext {
 
         Ok(())
     }
+
+    // Parses **modules.weakdep**.
+    fn load_weak_dependencies(&mut self) -> io::Result<()> {
+        let path = self.module_root.join("modules.weakdep");
+        if !path.exists() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("modules.weakdep not found at path: {}", path.display()),
+            ));
+        }
+
+        for line in read_lines(&path)? {
+            let line = line?;
+            // Format: as per depmod::output_weakdeps()
+            // weakdep mod_name dep1
+            // weakdep mod_name dep2
+            let parts: Vec<&str> = line.split_whitespace().collect();
+
+            if parts.len() != 3 || parts[0] != "weakdep" {
+                continue;
+            }
+
+            let module_name = parts[1].to_string();
+            let dep_name = parts[2].to_string();
+
+            // Update the existing module
+            if let Some(module) = self.modules_hash.get_mut(&module_name) {
+                module.weak_deps.push(dep_name);
+            }
+        }
+
+        Ok(())
+    }
+
+    // Parses **modules.builtin**.
+    fn load_builtin_modules(&mut self) -> io::Result<()> {
+        let path = self.module_root.join("modules.builtin");
+        if !path.exists() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("modules.builtin not found at path: {}", path.display()),
+            ));
+        }
+
+        for line in read_lines(&path)? {
+            let line = line?;
+            let path_str = line.trim();
+
+            if path_str.is_empty() {
+                continue;
+            }
+
+            // Extract module name from path
+            let module_name = extract_module_name(path_str);
+
+            // update its status
+            let module = self
+                .modules_hash
+                .entry(module_name.clone())
+                .or_insert_with(|| KmodModule {
+                    name: module_name,
+                    status: ModuleStatus::Builtin,
+                    path: PathBuf::new(),
+                    hard_deps: Vec::new(),
+                    soft_deps_pre: Vec::new(),
+                    soft_deps_post: Vec::new(),
+                    weak_deps: Vec::new(),
+                });
+            module.status = ModuleStatus::Builtin;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -220,6 +300,8 @@ mod tests {
         let root_dir_str = root_path.to_str().unwrap();
         write_test_file(&root_path, "modules.dep", "");
         write_test_file(&root_path, "modules.softdep", "");
+        write_test_file(&root_path, "modules.weakdep", "");
+        write_test_file(&root_path, "modules.builtin", "");
 
         match KmodContext::new(Some(root_dir_str)) {
             Ok(context) => {
@@ -364,6 +446,109 @@ mod tests {
 
         // check that mod_b is None (as it was not setup with KmodModule struct)
         assert!(ctx.modules_hash.get("mod_b").is_none());
+
+        cleanup_test_dir(&root_path);
+    }
+
+    #[test]
+    fn test_load_weakdeps() {
+        let root_path = setup_test_dir("weakdeps");
+        let mut ctx = set_context(&root_path);
+
+        // Setup KmodContext with the module that will receive weakdeps
+        ctx.modules_hash.insert(
+            "mod_a".to_string(),
+            KmodModule {
+                name: "mod_a".to_string(),
+                status: ModuleStatus::LoadableModule,
+                path: PathBuf::new(),
+                hard_deps: Vec::new(),
+                soft_deps_pre: Vec::new(),
+                soft_deps_post: Vec::new(),
+                weak_deps: Vec::new(),
+            },
+        );
+        ctx.modules_hash.insert(
+            "mod_b".to_string(),
+            KmodModule {
+                name: "mod_b".to_string(),
+                status: ModuleStatus::LoadableModule,
+                path: PathBuf::new(),
+                hard_deps: Vec::new(),
+                soft_deps_pre: Vec::new(),
+                soft_deps_post: Vec::new(),
+                weak_deps: Vec::new(),
+            },
+        );
+
+        // Define weak dependencies
+        let modules_weakdep_content = format!(
+            "weakdep mod_a weakdep_1\n\
+             weakdep mod_a weakdep_2\n\
+             weakdep mod_b weakdep_3\n"
+        );
+        write_test_file(&root_path, "modules.weakdep", &modules_weakdep_content);
+
+        ctx.load_weak_dependencies().unwrap();
+
+        // Check mod_a
+        let mod_a = ctx.modules_hash.get("mod_a").expect("mod_a not found");
+        assert_eq!(
+            mod_a.weak_deps,
+            vec!["weakdep_1", "weakdep_2"],
+            "Weak deps for mod_a incorrect"
+        );
+
+        // Check mod_b
+        let mod_b = ctx.modules_hash.get("mod_b").expect("mod_b not found");
+        assert_eq!(
+            mod_b.weak_deps,
+            vec!["weakdep_3"],
+            "Weak deps for mod_b incorrect"
+        );
+
+        cleanup_test_dir(&root_path);
+    }
+
+    #[test]
+    fn test_load_builtin() {
+        let root_path = setup_test_dir("builtin");
+        let mut ctx = set_context(&root_path);
+
+        // Define builtin modules
+        let modules_builtin_content = format!(
+            "kernel/builtin_mod1.ko\n\
+             kernel/builtin-mod2.ko\n" // builtin-mod2 => builtin_mod2
+        );
+        write_test_file(&root_path, "modules.builtin", &modules_builtin_content);
+
+        ctx.load_builtin_modules().unwrap();
+
+        // Check builtin_mod1
+        let mod1 = ctx
+            .modules_hash
+            .get("builtin_mod1")
+            .expect("builtin_mod1 not found");
+        assert_eq!(
+            mod1.status,
+            ModuleStatus::Builtin,
+            "builtin_mod1 status incorrect"
+        );
+        assert!(
+            mod1.path.as_os_str().is_empty(),
+            "Builtin path should be empty"
+        );
+
+        // Check builtin_mod2 (normalization)
+        let mod2 = ctx
+            .modules_hash
+            .get("builtin_mod2")
+            .expect("builtin_mod2 not found");
+        assert_eq!(
+            mod2.status,
+            ModuleStatus::Builtin,
+            "builtin_mod2 status incorrect"
+        );
 
         cleanup_test_dir(&root_path);
     }
