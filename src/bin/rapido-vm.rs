@@ -48,7 +48,11 @@ struct VmResources {
     net: bool,
 }
 
-fn vm_resource_line_process(line: &[u8], rscs: &mut VmResources) -> io::Result<()> {
+// Process a cpio path. @VmResources is updated for any corresponding rapido-rsc
+// path. Any path under rapido-rsc returns true (inc. parent), otherwise false.
+// XXX these paths assume leading '/' are stripped, which cpio.rs does before
+// writing cpio entries. Dracut also lacks leading '/' due to its staging area.
+fn vm_resource_line_process(line: &[u8], rscs: &mut VmResources) -> io::Result<bool> {
     match line {
         // vim compiled from string via: s/\(.\)/b'\1', /g
         // rapido-rsc/cpu/
@@ -94,10 +98,14 @@ fn vm_resource_line_process(line: &[u8], rscs: &mut VmResources) -> io::Result<(
          b'n', b'e', b't'] => {
             rscs.net = true;
         },
-        [ _unused @ .. ] => {},
+        // catch any unprocessed rapido-rsc path, so we return true.
+        [b'r', b'a', b'p', b'i', b'd', b'o', b'-', b'r', b's', b'c', .. ] => {},
+        // not a rapido-rsc path.
+        _ => return Ok(false),
     }
 
-    Ok(())
+    // got a valid rapido-rsc path or parent directory
+    Ok(true)
 }
 
 fn vm_resources_get(initramfs_img: &str) -> io::Result<VmResources> {
@@ -113,20 +121,27 @@ fn vm_resources_get(initramfs_img: &str) -> io::Result<VmResources> {
     // next_hdr_off is negative unless file len > 8k - (HDR_LEN + namesize)
     let reader = io::BufReader::new(f);
     let mut archive_walker = cpio::archive_walk(reader)?;
+    let mut in_rapido_rsc_path = false;
     while let Some(archive_ent) = archive_walker.next() {
-        match archive_ent {
+        let ent = match archive_ent {
             Err(e) => {
                 eprintln!("archive traversal failed");
                 return Err(e);
             },
-            // TODO optimization: break loop when leaving rapido-rsc/ paths.
-            // rsc entries could then be placed at the start of the archive to
-            // minimise traversal.
-            Ok(ent) => vm_resource_line_process(
-                // namesize includes nul. cpio ensures 0< namesize < PATH_MAX+1
-                &ent.name[0 .. (ent.namesize as usize) - 1],
-                &mut rscs
-            )?,
+            Ok(ent) => ent,
+        };
+
+        match vm_resource_line_process(
+            // namesize includes nul. cpio ensures 0< namesize < PATH_MAX+1
+            &ent.name[0 .. (ent.namesize as usize) - 1],
+            &mut rscs
+        )? {
+            true => in_rapido_rsc_path = true,
+            // optimization: break loop when leaving rapido-rsc/ paths.
+            // rsc entries must be placed together in the archive and can be
+            // placed at the start to minimise traversal.
+            false if in_rapido_rsc_path => break,
+            false => {},
         }
     }
 
