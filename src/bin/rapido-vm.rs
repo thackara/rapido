@@ -504,23 +504,26 @@ mod tests {
             mem: String::new(),
             net: false,
         };
-        assert!(vm_resource_line_process(line, &mut rscs).is_ok());
+        assert_eq!(vm_resource_line_process(line, &mut rscs).unwrap(), true);
         assert_eq!(rscs.cpus, 5);
 
         let line = b"rapido-rsc/mem/5G";
-        assert!(vm_resource_line_process(line, &mut rscs).is_ok());
+        assert_eq!(vm_resource_line_process(line, &mut rscs).unwrap(), true);
         assert_eq!(rscs.mem, "5G");
 
         let line = b"rapido-rsc/mem/5m";
-        assert!(vm_resource_line_process(line, &mut rscs).is_ok());
+        assert_eq!(vm_resource_line_process(line, &mut rscs).unwrap(), true);
         assert_eq!(rscs.mem, "5m");
 
         let line = b"rapido-rsc/mem/5t";
         assert!(vm_resource_line_process(line, &mut rscs).is_err());
 
         let line = b"rapido-rsc/net";
-        assert!(vm_resource_line_process(line, &mut rscs).is_ok());
+        assert_eq!(vm_resource_line_process(line, &mut rscs).unwrap(), true);
         assert_eq!(rscs.net, true);
+
+        let line = b"not/a/root/rapido-rsc/path";
+        assert_eq!(vm_resource_line_process(line, &mut rscs).unwrap(), false);
     }
 
     #[test]
