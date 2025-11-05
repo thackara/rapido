@@ -522,4 +522,10 @@ mod tests {
         assert!(vm_resource_line_process(line, &mut rscs).is_ok());
         assert_eq!(rscs.net, true);
     }
+
+    #[test]
+    fn test_proc_version_parse() {
+        let line = b"Linux version 6.17.0-2-default (geeko@buildhost) (gcc (SUSE Linux) 15.2.0, GNU ld (GNU Binutils; openSUSE Tumbleweed) 2.43.1.20241209-10) #1 SMP PREEMPT_DYNAMIC Thu Oct  2 08:12:40 UTC 2025 (190326b)";
+        assert_eq!(get_host_rel(line).unwrap(), "6.17.0-2-default");
+    }
 }
