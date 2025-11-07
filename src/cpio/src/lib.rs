@@ -775,4 +775,67 @@ mod tests {
         // should prob return a single '/' for this...
         assert_eq!(b"//", path_trim_prefixes(Path::new("//")).unwrap());
     }
+
+    // archive a file with and without data, via archive_file and archive_path
+    #[test]
+    fn test_archive_file() {
+        let mut c = io::Cursor::new(Vec::new());
+        let data = b"this is some file data";
+        let amd1 = ArchiveMd{
+            nlink: 1,
+            mode: S_IFREG | 0o777,
+            uid: 1,
+            gid: 2,
+            mtime: 3,
+            rmajor: 4,
+            rminor: 5,
+            len: 0,
+        };
+        let amd2 = ArchiveMd{
+            len: data.len() as u32,
+            ..amd1
+        };
+
+        let p1 = Path::new("hello");
+        let p2 = Path::new("bye");
+        let props = ArchiveProperties::default();
+        let mut state = ArchiveState::new(&props);
+        archive_path(&mut state, &p1, &amd1, &mut c).unwrap();
+        archive_file(&mut state, &p2, &amd2, io::Cursor::new(data), &mut c).unwrap();
+        // archive path should fail for len > 0 files
+        assert!(archive_path(&mut state, &p2, &amd2, &mut c).is_err());
+
+        c.seek(io::SeekFrom::Start(0)).unwrap();
+        let mut aw = archive_walk(c).unwrap();
+
+        assert_eq!(
+            aw.next().unwrap().unwrap(),
+            ArchiveEnt{
+                md: amd1,
+                namesize: (p1.as_os_str().len() + 1).try_into().unwrap(),
+                name: {
+                    let mut buf = [0u8; (PATH_MAX + 1) as usize];
+                    let mut fbuf = &mut buf[0 .. (PATH_MAX + 1) as usize];
+                    fbuf.write_all(p1.as_os_str().as_encoded_bytes()).unwrap();
+                    buf
+                },
+            }
+        );
+
+        assert_eq!(
+            aw.next().unwrap().unwrap(),
+            ArchiveEnt{
+                md: amd2,
+                namesize: (p2.as_os_str().len() + 1).try_into().unwrap(),
+                name: {
+                    let mut buf = [0u8; (PATH_MAX + 1) as usize];
+                    let mut fbuf = &mut buf[0 .. (PATH_MAX + 1) as usize];
+                    fbuf.write_all(p2.as_os_str().as_encoded_bytes()).unwrap();
+                    buf
+                },
+            }
+        );
+
+        assert!(aw.next().is_none());
+    }
 }
