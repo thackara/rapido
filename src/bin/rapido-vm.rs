@@ -201,7 +201,7 @@ fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs> {
         if line == "CONFIG_X86_64=y" {
             qemu_args = match ksrc {
                 Some(ks) => Some(QemuArgs{
-                    kernel_img: format!("{ks}/bzImage"),
+                    kernel_img: format!("{ks}/arch/x86/boot/bzImage"),
                     qemu_bin: "qemu-system-x86_64",
                     console: "ttyS0",
                     params,
