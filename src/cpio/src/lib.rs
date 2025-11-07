@@ -324,8 +324,8 @@ pub fn archive_symlink<W: Seek + Write>(
         filesize = datalen,
         major = 0,
         minor = 0,
-        rmajor = 0,
-        rminor = 0,
+        rmajor = md.rmajor,
+        rminor = md.rminor,
         namesize = fname.len() + 1,
         chksum = 0
     )?;
@@ -413,8 +413,8 @@ pub fn archive_file<R: Read, W: Seek + Write>(
         filesize = md.len,
         major = 0,
         minor = 0,
-        rmajor = 0,
-        rminor = 0,
+        rmajor = md.rmajor,
+        rminor = md.rminor,
         namesize = fname.len() + 1 + data_align_seek as usize,
         chksum = 0
     )?;
