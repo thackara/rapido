@@ -232,10 +232,10 @@ pub fn archive_path<W: Seek + Write>(
 ) -> io::Result<()> {
     let fname = path_trim_prefixes(path)?;
 
-    if md.mode & S_IFMT == S_IFREG || md.mode & S_IFMT == S_IFLNK {
+    if (md.mode & S_IFMT == S_IFREG && md.len > 0) || md.mode & S_IFMT == S_IFLNK {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "archive_path does not support files or symlinks",
+            "archive_path does not support data files or symlinks",
         ));
     }
 
