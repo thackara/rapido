@@ -352,11 +352,11 @@ pub fn archive_symlink<W: Seek + Write>(
     Ok(())
 }
 
-pub fn archive_file<W: Seek + Write>(
+pub fn archive_file<R: Read, W: Seek + Write>(
     state: &mut ArchiveState,
     path: &Path,
     md: &ArchiveMd,
-    in_file: &fs::File,
+    mut reader: R,
     mut writer: W,
 ) -> io::Result<()> {
     let fname = path_trim_prefixes(path)?;
@@ -439,7 +439,6 @@ pub fn archive_file<W: Seek + Write>(
 
     // io::copy() can reflink: https://github.com/rust-lang/rust/pull/75272 \o/
     if md.len > 0 {
-        let mut reader = io::BufReader::new(in_file);
         let copied = io::copy(&mut reader, &mut writer)?;
         if copied != u64::from(md.len) {
             dout!("copied {}, expected {}", copied, md.len);
