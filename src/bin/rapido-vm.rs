@@ -199,73 +199,53 @@ fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs> {
     let f = fs::OpenOptions::new().read(true).open(&kconfig)?;
     for line in io::BufReader::new(f).lines().map_while(Result::ok) {
         if line == "CONFIG_X86_64=y" {
-            qemu_args = match ksrc {
-                Some(ks) => Some(QemuArgs{
-                    kernel_img: format!("{ks}/arch/x86/boot/bzImage"),
-                    qemu_bin: "qemu-system-x86_64",
-                    console: "ttyS0",
-                    params,
-                }),
-                None => Some(QemuArgs{
+            qemu_args = Some(QemuArgs{
+                kernel_img: match ksrc {
+                    Some(ks) => format!("{ks}/arch/x86/boot/bzImage"),
                     // krel always set without KERNEL_SRC
-                    kernel_img: format!("/boot/vmlinuz-{}", krel.unwrap()),
-                    qemu_bin: "qemu-system-x86_64",
-                    console: "ttyS0",
-                    params,
-                }),
-            };
+                    None => format!("/boot/vmlinuz-{}", krel.unwrap()),
+                },
+                qemu_bin: "qemu-system-x86_64",
+                console: "ttyS0",
+                params,
+            });
             break;
         } else if line == "CONFIG_ARM64=y" {
             params.extend([
                 "-machine", "virt,gic-version=host",
                 "-cpu", "host"
             ]);
-            qemu_args = match ksrc {
-                Some(ks) => Some(QemuArgs{
-                    kernel_img: format!("{ks}/arch/arm64/boot/Image"),
-                    qemu_bin: "qemu-system-aarch64",
-                    console: "ttyAMA0",
-                    params,
-                }),
-                None => Some(QemuArgs{
-                    kernel_img: format!("/boot/Image-{}", krel.unwrap()),
-                    qemu_bin: "qemu-system-aarch64",
-                    console: "ttyAMA0",
-                    params,
-                }),
-            };
+            qemu_args = Some(QemuArgs{
+                kernel_img: match ksrc {
+                    Some(ks) => format!("{ks}/arch/arm64/boot/Image"),
+                    None => format!("/boot/Image-{}", krel.unwrap()),
+                },
+                qemu_bin: "qemu-system-aarch64",
+                console: "ttyAMA0",
+                params,
+            });
             break;
 	} else if line == "CONFIG_PPC64=y" {
-            qemu_args = match ksrc {
-                Some(ks) => Some(QemuArgs{
-                    kernel_img: format!("{ks}/arch/powerpc/boot/zImage"),
-                    qemu_bin: "qemu-system-ppc64",
-                    console: "hvc0",
-                    params,
-                }),
-                None => Some(QemuArgs{
-                    kernel_img: format!("/boot/vmlinux-{}", krel.unwrap()),
-                    qemu_bin: "qemu-system-ppc64",
-                    console: "hvc0",
-                    params,
-                }),
-            };
+            qemu_args = Some(QemuArgs{
+                kernel_img: match ksrc {
+                    Some(ks) => format!("{ks}/arch/powerpc/boot/zImage"),
+                    None => format!("/boot/vmlinux-{}", krel.unwrap()),
+                },
+                qemu_bin: "qemu-system-ppc64",
+                console: "hvc0",
+                params,
+            });
             break;
 	} else if line == "CONFIG_S390=y" {
-            qemu_args = match ksrc {
-                Some(ks) => Some(QemuArgs{
-                    kernel_img: format!("{ks}/arch/s390/boot/bzImage"),
-                    qemu_bin: "qemu-system-s390x",
-                    console: "ttysclp0",
-                    params,
-                }),
-                None => Some(QemuArgs{
-                    kernel_img: format!("/boot/bzImage-{}", krel.unwrap()),
-                    qemu_bin: "qemu-system-s390x",
-                    console: "ttysclp0",
-                    params,
-                }),
-            };
+            qemu_args = Some(QemuArgs{
+                kernel_img: match ksrc {
+                    Some(ks) => format!("{ks}/arch/s390/boot/bzImage"),
+                    None => format!("/boot/bzImage-{}", krel.unwrap()),
+                },
+                qemu_bin: "qemu-system-s390x",
+                console: "ttysclp0",
+                params,
+            });
             break;
         }
     }
