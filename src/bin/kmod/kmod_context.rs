@@ -93,6 +93,10 @@ impl KmodContext {
         ctx.load_builtin_modules()
             .map_err(|e| format!("Failed to load modules.builtin: {}", e))?;
 
+        // load modules.alias
+        ctx.load_aliases()
+            .map_err(|e| format!("Failed to load modules.alias: {}", e))?;
+
         Ok(ctx)
     }
 
@@ -253,6 +257,42 @@ impl KmodContext {
             module.status = ModuleStatus::Builtin;
         }
         Ok(())
+    }
+
+    fn load_aliases(&mut self) -> io::Result<()> {
+        let path = self.module_root.join("modules.alias");
+        if !path.exists() {
+            return Ok(());
+        }
+
+        for line in read_lines(&path)? {
+            let line = line?;
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            // Format: alias <alias_name> <module_name>
+            if parts.len() >= 3 && parts[0] == "alias" {
+                let alias = parts[1].to_string();
+                let module_name = parts[2].to_string();
+                // A -> B
+                self.alias_map.insert(alias.clone(), module_name.clone());
+            }
+        }
+        Ok(())
+    }
+
+    pub fn find(&self, name: &str) -> Option<KmodModule> {
+        if let Some(module) = self.modules_hash.get(name) {
+            return Some(module.clone());
+        }
+
+        // alias map (1-1)
+
+        if let Some(actual_name) = self.alias_map.get(name) {
+            if let Some(module) = self.modules_hash.get(actual_name) {
+                return Some(module.clone());
+            }
+        }
+
+        None
     }
 }
 
@@ -550,6 +590,319 @@ mod tests {
             "builtin_mod2 status incorrect"
         );
 
+        cleanup_test_dir(&root_path);
+    }
+
+    #[test]
+    fn test_load_aliases() {
+        let root_path = setup_test_dir("aliases");
+        let mut ctx = set_context(&root_path);
+
+        // Define module for alias to point to
+        ctx.modules_hash.insert(
+            "mod_target".to_string(),
+            KmodModule {
+                name: "mod_target".to_string(),
+                status: ModuleStatus::LoadableModule,
+                path: PathBuf::new(),
+                hard_deps: Vec::new(),
+                soft_deps_pre: Vec::new(),
+                soft_deps_post: Vec::new(),
+                weak_deps: Vec::new(),
+            },
+        );
+
+        // Define aliases
+        let modules_alias_content = format!(
+            "alias alias_1 mod_target\n\
+             alias alias_2 mod_target\n\
+             # this line should be ignored: alias bad_line mod_target\n\
+             alias complex_alias:v*d* mod_target\n\
+             alias mod_name_is_alias mod_target\n"
+        );
+        write_test_file(&root_path, "modules.alias", &modules_alias_content);
+
+        ctx.load_aliases().unwrap();
+
+        // Check alias map contents
+        assert_eq!(ctx.alias_map.get("alias_1").unwrap(), "mod_target");
+        assert_eq!(ctx.alias_map.get("alias_2").unwrap(), "mod_target");
+        assert_eq!(
+            ctx.alias_map.get("complex_alias:v*d*").unwrap(),
+            "mod_target"
+        );
+        assert!(ctx.alias_map.get("bad_line").is_none());
+
+        cleanup_test_dir(&root_path);
+    }
+
+    #[test]
+    fn test_find() {
+        let mut ctx = set_context(&PathBuf::new());
+
+        // setup KmodModule for find calls
+        let target_module = KmodModule {
+            name: "mod_target".to_string(),
+            status: ModuleStatus::LoadableModule,
+            path: PathBuf::from("kernel/target.ko"),
+            hard_deps: vec!["dep1".to_string()],
+            soft_deps_pre: Vec::new(),
+            soft_deps_post: Vec::new(),
+            weak_deps: Vec::new(),
+        };
+        ctx.modules_hash
+            .insert(target_module.name.clone(), target_module.clone());
+        ctx.alias_map
+            .insert("alias_target".to_string(), "mod_target".to_string());
+        ctx.modules_hash.insert(
+            "builtin_mod".to_string(),
+            KmodModule {
+                name: "builtin_mod".to_string(),
+                status: ModuleStatus::Builtin,
+                path: PathBuf::new(),
+                hard_deps: Vec::new(),
+                soft_deps_pre: Vec::new(),
+                soft_deps_post: Vec::new(),
+                weak_deps: Vec::new(),
+            },
+        );
+
+        // Direct hit (Loadable Module)
+        let found_direct = ctx
+            .find("mod_target")
+            .expect("Should find mod_target directly");
+        assert_eq!(found_direct.status, ModuleStatus::LoadableModule);
+        assert_eq!(found_direct.hard_deps.len(), 1);
+
+        // alias hit
+        let found_alias = ctx
+            .find("alias_target")
+            .expect("Should find mod_target via alias");
+        assert_eq!(found_alias.name, "mod_target");
+
+        // Builtin Module
+        let found_builtin = ctx.find("builtin_mod").expect("Should find builtin_mod");
+        assert_eq!(found_builtin.status, ModuleStatus::Builtin);
+
+        // Not Found
+        assert!(
+            ctx.find("non_existent").is_none(),
+            "Should not find non_existent module"
+        );
+
+        // alias that points to a non-existent module (should fail gracefully)
+        ctx.alias_map
+            .insert("bad_alias".to_string(), "ghost_mod".to_string());
+        assert!(
+            ctx.find("bad_alias").is_none(),
+            "alias pointing to a ghost module should return None"
+        );
+    }
+
+    #[test]
+    fn test_kmod_context_full_load() {
+        // -- SETUP --
+        let root_path = setup_test_dir("full_load");
+        let root_dir_str = root_path.to_str().unwrap();
+
+        // create module files
+        // mod_a and mod_b are loadable modules.
+        write_test_file(&root_path, "kernel/mod_a.ko", "");
+        write_test_file(&root_path, "kernel/mod_b.ko.xz", "");
+
+        // modules.dep (hard deps)
+        let modules_dep_content = format!(
+            "kernel/mod_a.ko: kernel/mod_b.ko.xz kernel/mod_c.ko\n\
+             kernel/mod_b.ko.xz:\n"
+        );
+        write_test_file(&root_path, "modules.dep", &modules_dep_content);
+
+        // modules.softdep (soft deps)
+        let modules_softdep_content = "softdep mod_a pre: mod_d post: mod_e mod_f\n";
+        write_test_file(&root_path, "modules.softdep", modules_softdep_content);
+
+        // modules.weakdep (weak deps)
+        let modules_weakdep_content =
+            "weakdep mod_a mod_g\nweakdep mod_a mod_h\nweakdep mod_b mod_i\nweakdep mod_b mod_j\n";
+        write_test_file(&root_path, "modules.weakdep", modules_weakdep_content);
+
+        // modules.builtin
+        let modules_builtin_content = "kernel/mod_builtin.ko\n";
+        write_test_file(&root_path, "modules.builtin", modules_builtin_content);
+
+        // modules.alias
+        let modules_alias_content =
+            "alias alias_for_b mod_b\nalias mod-b mod_b\nalias mod-intel-b mod_b\n";
+        write_test_file(&root_path, "modules.alias", modules_alias_content);
+
+        // -- LOAD KmodContext --
+
+        let context = KmodContext::new(Some(root_dir_str)).unwrap();
+
+        // -- ASSERTIONS --
+
+        // Check mod_a (loadable-module, hard/soft/weak dependencies)
+        let mod_a = context.find("mod_a").expect("mod_a should be found");
+        assert_eq!(mod_a.status, ModuleStatus::LoadableModule);
+        assert!(
+            mod_a.path.ends_with("kernel/mod_a.ko"),
+            "Path should point to the module file"
+        );
+        assert_eq!(
+            mod_a.hard_deps,
+            vec!["mod_b", "mod_c"],
+            "hard dependencies check failed"
+        );
+        assert_eq!(
+            mod_a.soft_deps_pre,
+            vec!["mod_d"],
+            "soft pre-dependencies check failed"
+        );
+        assert_eq!(
+            mod_a.soft_deps_post,
+            vec!["mod_e", "mod_f"],
+            "soft post-dependencies check failed"
+        );
+        assert_eq!(
+            mod_a.weak_deps,
+            vec!["mod_g", "mod_h"],
+            "weak dependencies check failed"
+        );
+
+        // Check mod_b (loadable-module, weak dep)
+        let mod_b = context.find("mod_b").expect("mod_b should be found");
+        assert_eq!(mod_b.status, ModuleStatus::LoadableModule);
+        assert!(
+            mod_b.path.ends_with("kernel/mod_b.ko.xz"),
+            "Path should point to the compressed module file"
+        );
+        assert_eq!(
+            mod_b.hard_deps.len(),
+            0,
+            "mod_b should have no hard dependencies"
+        );
+        assert_eq!(
+            mod_b.weak_deps,
+            vec!["mod_i", "mod_j"],
+            "mod_b weak dependency check failed"
+        );
+
+        // Check builtin
+        let builtin_mod = context
+            .find("mod_builtin")
+            .expect("mod_builtin should be found");
+        assert_eq!(
+            builtin_mod.status,
+            ModuleStatus::Builtin,
+            "Builtin status check failed"
+        );
+
+        // Check alias Lookup
+        let aliased_mod = context
+            .find("alias_for_b")
+            .expect("alias_for_b should resolve");
+        assert_eq!(
+            aliased_mod.name, "mod_b",
+            "alias should resolve to the correct module name"
+        );
+        assert_eq!(
+            aliased_mod.status,
+            ModuleStatus::LoadableModule,
+            "alias status(LoadableModule) failed"
+        );
+
+        // Check ModuleNotFound
+        assert!(
+            context.find("non_existent_mod").is_none(),
+            "non-existent module should return None"
+        );
+
+        // -- CLEANUP --
+        cleanup_test_dir(&root_path);
+    }
+
+    #[test]
+    fn test_kmod_context_complex_alias_resolve() {
+        // -- SETUP --
+        let root_path = setup_test_dir("alias_test");
+        let root_dir_str = root_path.to_str().unwrap();
+
+        // Path: kernel/arch/x86/sub/mod32c-intel.ko.zst -> name: mod32c_intel
+        write_test_file(&root_path, "kernel/arch/x86/sub/mod32c-intel.ko.zst", "");
+
+        // write module file (the one with the softdep)
+        // Path: kernel/fs/fsmodule/fsmodule.ko.zst -> name: fsmodule
+        write_test_file(&root_path, "kernel/fs/fsmodule/fsmodule.ko.zst", "");
+
+        // modules.dep: contains all loadable modules
+        let modules_dep_content = format!(
+            "kernel/fs/fsmodule/fsmodule.ko.zst: kernel/lib/other_dep.ko\n\
+             kernel/arch/x86/sub/mod32c-intel.ko.zst:\n\
+             kernel/lib/other_dep.ko:\n"
+        );
+        write_test_file(&root_path, "modules.dep", &modules_dep_content);
+
+        // modules.softdep: fsmodule has a soft dependency 'mod32c' (the alias)
+        let modules_softdep_content = "softdep fsmodule pre: mod32c\n";
+        write_test_file(&root_path, "modules.softdep", modules_softdep_content);
+
+        // modules.alias: alias 'mod32c' points to 'mod32c_intel'
+        let modules_alias_content = format!(
+            "alias sub-mod32c-intel mod32c_intel\n\
+             alias mod32c-intel mod32c_intel\n\
+             alias sub-mod32c mod32c_intel\n\
+             alias mod32c mod32c_intel\n\
+             alias cpu:type:x86,ven*fam*mod*:feature:*1234* mod32c_intel\n"
+        );
+        write_test_file(&root_path, "modules.alias", &modules_alias_content);
+
+        // modules.builtin and modules.weakdep are empty.
+        write_test_file(&root_path, "modules.builtin", "");
+        write_test_file(&root_path, "modules.weakdep", "");
+
+        // -- LOAD KmodContext --
+        let context = KmodContext::new(Some(root_dir_str)).unwrap();
+
+        // -- ASSERTIONS --
+
+        // fsmodule soft dependency
+        let fsmodule = context.find("fsmodule").expect("fsmodule should be found");
+        assert_eq!(
+            fsmodule.soft_deps_pre,
+            vec!["mod32c"],
+            "fsmodule should softdep on 'mod32c' (the alias name)"
+        );
+
+        // Check alias_map for expected entry
+        assert_eq!(
+            context.alias_map.get("mod32c").unwrap(),
+            "mod32c_intel",
+            "alias 'mod32c' should map to 'mod32c_intel'"
+        );
+
+        // finding alias "mod32c" should resolve to the real module
+        let aliased_mod = context
+            .find("mod32c")
+            .expect("Finding by alias 'mod32c' should resolve");
+
+        // The returned module should be the actual module, mod32c_intel
+        assert_eq!(
+            aliased_mod.name, "mod32c_intel",
+            "alias lookup should return the real module name"
+        );
+        assert_eq!(
+            aliased_mod.status,
+            ModuleStatus::LoadableModule,
+            "Resolved module status should be LoadableModule"
+        );
+        assert!(
+            aliased_mod
+                .path
+                .ends_with("kernel/arch/x86/sub/mod32c-intel.ko.zst"),
+            "Resolved module path is incorrect"
+        );
+
+        // -- CLEANUP --
         cleanup_test_dir(&root_path);
     }
 }
