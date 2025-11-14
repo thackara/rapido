@@ -9,6 +9,8 @@ use std::os::unix::fs::FileTypeExt;
 use std::path;
 use std::process;
 
+use rapido::host_kernel_vers;
+
 fn vm_is_running(vm_pid_file: &str) -> io::Result<bool> {
     let mut pid = String::new();
     let n = match fs::File::open(vm_pid_file) {
@@ -148,21 +150,6 @@ fn vm_resources_get(initramfs_img: &str) -> io::Result<VmResources> {
     Ok(rscs)
 }
 
-// Linux version 6.17.0-2-default ...
-fn get_host_rel(kvers: &[u8]) -> io::Result<&str> {
-
-    match str::from_utf8(kvers) {
-        Err(_) => Err(io::Error::from(io::ErrorKind::InvalidData)),
-        Ok(s) => match s.strip_prefix("Linux version ") {
-            None => Err(io::Error::from(io::ErrorKind::InvalidData)),
-            Some(rel) => match rel.split_once([' ']) {
-                Some((rel, _)) => Ok(rel),
-                None => Err(io::Error::from(io::ErrorKind::InvalidData)),
-            },
-        },
-    }
-}
-
 struct QemuArgs<'a>  {
     qemu_bin: &'a str,
     kernel_img: String,
@@ -180,8 +167,7 @@ fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs> {
         None => match conf.get("KERNEL_RELEASE") {
             Some(rel) => (format!("/boot/config-{rel}"), Some(rel.clone())),
             None => {
-                let kvers = fs::read("/proc/version")?;
-                let rel = get_host_rel(&kvers)?;
+                let rel = host_kernel_vers()?;
                 (format!("/boot/config-{rel}"), Some(rel.to_string()))
             },
         },
@@ -504,11 +490,5 @@ mod tests {
 
         let line = b"not/a/root/rapido-rsc/path";
         assert_eq!(vm_resource_line_process(line, &mut rscs).unwrap(), false);
-    }
-
-    #[test]
-    fn test_proc_version_parse() {
-        let line = b"Linux version 6.17.0-2-default (geeko@buildhost) (gcc (SUSE Linux) 15.2.0, GNU ld (GNU Binutils; openSUSE Tumbleweed) 2.43.1.20241209-10) #1 SMP PREEMPT_DYNAMIC Thu Oct  2 08:12:40 UTC 2025 (190326b)";
-        assert_eq!(get_host_rel(line).unwrap(), "6.17.0-2-default");
     }
 }
