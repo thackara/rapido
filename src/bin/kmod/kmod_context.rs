@@ -56,20 +56,11 @@ fn extract_module_name(path_str: &str) -> String {
 }
 
 impl KmodContext {
-    pub fn new(dirname: Option<&str>) -> Result<Self, String> {
-        let module_root: PathBuf = match dirname {
-            Some(dir) => PathBuf::from(dir),
-            None => {
-                return Err(
-                    "Kernel module directory (via rapido.conf: KERNEL_INSTALL_MOD_PATH) must be provided.".to_string()
-                );
-            }
-        };
-
+    pub fn new(dirname: &str) -> Result<Self, String> {
         let mut ctx = KmodContext {
             modules_hash: HashMap::new(),
             alias_map: HashMap::new(),
-            module_root: module_root,
+            module_root: PathBuf::from(dirname),
         };
 
         println!(
@@ -343,7 +334,7 @@ mod tests {
         write_test_file(&root_path, "modules.weakdep", "");
         write_test_file(&root_path, "modules.builtin", "");
 
-        match KmodContext::new(Some(root_dir_str)) {
+        match KmodContext::new(root_dir_str) {
             Ok(context) => {
                 assert_eq!(context.module_root, root_path, "Module root path mismatch");
             }
@@ -354,25 +345,11 @@ mod tests {
     }
 
     #[test]
-    fn test_new_with_no_dir_error() {
-        match KmodContext::new(None) {
-            Err(e) => {
-                assert!(
-                    e.contains("must be provided"),
-                    "Error message should indicate missing directory, got: {}",
-                    e
-                );
-            }
-            Ok(_) => panic!("KmodContext::new should have failed when dirname is None"),
-        }
-    }
-
-    #[test]
     fn test_kmod_context_new_error() {
         let root_path = setup_test_dir("missing_dep_dir");
         let root_dir_str = root_path.to_str().unwrap();
         // modules.*dep is missing (first hit load_hard_dependencies)
-        match KmodContext::new(Some(root_dir_str)) {
+        match KmodContext::new(root_dir_str) {
             Ok(_) => panic!("Context should fail because modules.dep is missing"),
             Err(e) => assert!(e.contains("modules.dep not found")),
         }
@@ -737,7 +714,7 @@ mod tests {
 
         // -- LOAD KmodContext --
 
-        let context = KmodContext::new(Some(root_dir_str)).unwrap();
+        let context = KmodContext::new(root_dir_str).unwrap();
 
         // -- ASSERTIONS --
 
@@ -861,7 +838,7 @@ mod tests {
         write_test_file(&root_path, "modules.weakdep", "");
 
         // -- LOAD KmodContext --
-        let context = KmodContext::new(Some(root_dir_str)).unwrap();
+        let context = KmodContext::new(root_dir_str).unwrap();
 
         // -- ASSERTIONS --
 

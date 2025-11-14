@@ -232,7 +232,14 @@ fn main() {
     };
 
     let initial_modules = args.module_names;
-    let kmod_dir = args.kmod_dir;
+    let kmod_dir = match args.kmod_dir {
+        None => {
+            print_usage();
+            process::exit(0);
+        },
+        Some(d) => d,
+    };
+
     if initial_modules.is_empty() {
         print_usage();
         process::exit(0);
@@ -242,7 +249,7 @@ fn main() {
     println!("Initial modules: {:?}", initial_modules);
 
     // The KmodContext::new logic handles the kernel directory derivation based on kmod_dir
-    match KmodContext::new(kmod_dir.as_deref()) {
+    match KmodContext::new(&kmod_dir) {
         Ok(context) => {
             print_dependency_graph(&context, &initial_modules);
 
