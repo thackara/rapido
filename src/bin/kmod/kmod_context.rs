@@ -12,7 +12,6 @@ use std::path::PathBuf;
 pub enum ModuleStatus {
     Builtin,
     LoadableModule,
-    NotFound,
 }
 
 #[derive(Debug, Clone)]
@@ -95,8 +94,8 @@ impl KmodContext {
     fn load_hard_dependencies(&mut self) -> io::Result<()> {
         let path = self.module_root.join("modules.dep");
         if !path.exists() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
                 format!("modules.dep not found at path: {}", path.display()),
             ));
         }
@@ -145,8 +144,8 @@ impl KmodContext {
     fn load_soft_dependencies(&mut self) -> io::Result<()> {
         let path = self.module_root.join("modules.softdep");
         if !path.exists() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
                 format!("modules.softdep not found at path: {}", path.display()),
             ));
         }
@@ -182,8 +181,8 @@ impl KmodContext {
     fn load_weak_dependencies(&mut self) -> io::Result<()> {
         let path = self.module_root.join("modules.weakdep");
         if !path.exists() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
                 format!("modules.weakdep not found at path: {}", path.display()),
             ));
         }
@@ -215,8 +214,8 @@ impl KmodContext {
     fn load_builtin_modules(&mut self) -> io::Result<()> {
         let path = self.module_root.join("modules.builtin");
         if !path.exists() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
                 format!("modules.builtin not found at path: {}", path.display()),
             ));
         }
