@@ -15,6 +15,7 @@ use elf::endian::AnyEndian;
 use crosvm::argument::{self, Argument};
 mod kmod;
 use kmod::kmod_context::{KmodContext, ModuleStatus};
+use rapido::host_kernel_vers;
 extern crate kv_conf;
 
 // Don't print debug messages on release builds...
@@ -241,21 +242,6 @@ fn archive_kmod_path<W: Seek + Write>(
     Ok(())
 }
 
-// Linux version 6.17.0-2-default ...
-fn get_host_rel(kvers: &[u8]) -> io::Result<&str> {
-
-    match str::from_utf8(kvers) {
-        Err(_) => Err(io::Error::from(io::ErrorKind::InvalidData)),
-        Ok(s) => match s.strip_prefix("Linux version ") {
-            None => Err(io::Error::from(io::ErrorKind::InvalidData)),
-            Some(rel) => match rel.split_once([' ']) {
-                Some((rel, _)) => Ok(rel),
-                None => Err(io::Error::from(io::ErrorKind::InvalidData)),
-            },
-        },
-    }
-}
-
 fn args_usage(params: &[Argument]) {
     argument::print_help("rapido-cut", "OUTPUT", params);
 }
@@ -400,27 +386,25 @@ fn main() -> io::Result<()> {
         // handle no rapido.conf
         Err(_) => HashMap::new(),
     };
-    // get kver, will be replaced by lib call to get_kver later
+
+    // TODO: get release from KERNEL_SRC if set: include/config/kernel.release
+
     let kver: String = match conf.get("KERNEL_RELEASE") {
         Some(rel) => rel.clone(),
-        None => {
-            let proc_version = fs::read("/proc/version")?;
-            let rel_slice = get_host_rel(&proc_version)?;
-            rel_slice.to_string()
-        }
+        None => host_kernel_vers()?,
     };
     let kver_path = format!("/lib/modules/{kver}");
 
     // get kmod_dir, falling back to /lib/modules/<kver>
     let kmod_dir: String = match conf.get("KERNEL_INSTALL_MOD_PATH") {
+        // FIXME: KERNEL_INSTALL_MOD_PATH is the parent, under which we need
+        // to check lib/modules/<ver>.
         Some(kmod) => kmod.clone(),
         None => {
-            let proc_version = fs::read("/proc/version")?;
-            let rel_slice = get_host_rel(&proc_version)?;
+            let rel_slice = host_kernel_vers()?;
             format!("/lib/modules/{rel_slice}")
         }
     };
-    //
 
     let cpio_out_path = match args_process(&mut state.bins.names, &mut state.kmods.names) {
         Ok(p) => p,
@@ -609,6 +593,8 @@ fn main() -> io::Result<()> {
                 .iter()
                 .map(|(name, _dst)| name.clone())
                 .collect();
+            // TODO reuse paths_seen based dedup and archive paths as they're
+            // encountered, instead of this extra HashSet?
             let mut kmod_paths: HashSet<PathBuf> = HashSet::new();
             let kmod_root_path = Path::new(&kmod_dir);
             let kver_root_path = Path::new(&kver_path);
