@@ -585,7 +585,7 @@ fn main() -> io::Result<()> {
     // KmodContext initialization and usage
     // src: replace with kv-conf KERNEL_INSTALL_MOD_PATH value
     // dst: inside initrd it will /lib/modules/{kver}/module.path
-    match KmodContext::new(kmod_dir.as_str()) {
+    match KmodContext::new(Path::new(&kmod_dir)) {
         Ok(context) => {
             let module_names: Vec<String> = state
                 .kmods

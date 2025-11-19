@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 
 mod kmod_context;
@@ -249,7 +249,7 @@ fn main() {
     println!("Initial modules: {:?}", initial_modules);
 
     // The KmodContext::new logic handles the kernel directory derivation based on kmod_dir
-    match KmodContext::new(&kmod_dir) {
+    match KmodContext::new(&Path::new(&kmod_dir)) {
         Ok(context) => {
             print_dependency_graph(&context, &initial_modules);
 

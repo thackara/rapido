@@ -55,7 +55,7 @@ fn extract_module_name(path_str: &str) -> String {
 }
 
 impl KmodContext {
-    pub fn new(dirname: &str) -> Result<Self, String> {
+    pub fn new(dirname: &Path) -> Result<Self, String> {
         let mut ctx = KmodContext {
             modules_hash: HashMap::new(),
             alias_map: HashMap::new(),
@@ -327,13 +327,12 @@ mod tests {
     #[test]
     fn test_new_with_valid_dir() {
         let root_path = setup_test_dir("test_new_success");
-        let root_dir_str = root_path.to_str().unwrap();
         write_test_file(&root_path, "modules.dep", "");
         write_test_file(&root_path, "modules.softdep", "");
         write_test_file(&root_path, "modules.weakdep", "");
         write_test_file(&root_path, "modules.builtin", "");
 
-        match KmodContext::new(root_dir_str) {
+        match KmodContext::new(&root_path) {
             Ok(context) => {
                 assert_eq!(context.module_root, root_path, "Module root path mismatch");
             }
@@ -346,9 +345,8 @@ mod tests {
     #[test]
     fn test_kmod_context_new_error() {
         let root_path = setup_test_dir("missing_dep_dir");
-        let root_dir_str = root_path.to_str().unwrap();
         // modules.*dep is missing (first hit load_hard_dependencies)
-        match KmodContext::new(root_dir_str) {
+        match KmodContext::new(&root_path) {
             Ok(_) => panic!("Context should fail because modules.dep is missing"),
             Err(e) => assert!(e.contains("modules.dep not found")),
         }
@@ -679,7 +677,6 @@ mod tests {
     fn test_kmod_context_full_load() {
         // -- SETUP --
         let root_path = setup_test_dir("full_load");
-        let root_dir_str = root_path.to_str().unwrap();
 
         // create module files
         // mod_a and mod_b are loadable modules.
@@ -713,7 +710,7 @@ mod tests {
 
         // -- LOAD KmodContext --
 
-        let context = KmodContext::new(root_dir_str).unwrap();
+        let context = KmodContext::new(&root_path).unwrap();
 
         // -- ASSERTIONS --
 
@@ -801,7 +798,6 @@ mod tests {
     fn test_kmod_context_complex_alias_resolve() {
         // -- SETUP --
         let root_path = setup_test_dir("alias_test");
-        let root_dir_str = root_path.to_str().unwrap();
 
         // Path: kernel/arch/x86/sub/mod32c-intel.ko.zst -> name: mod32c_intel
         write_test_file(&root_path, "kernel/arch/x86/sub/mod32c-intel.ko.zst", "");
@@ -837,7 +833,7 @@ mod tests {
         write_test_file(&root_path, "modules.weakdep", "");
 
         // -- LOAD KmodContext --
-        let context = KmodContext::new(root_dir_str).unwrap();
+        let context = KmodContext::new(&root_path).unwrap();
 
         // -- ASSERTIONS --
 
