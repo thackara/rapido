@@ -2,6 +2,7 @@
 // Copyright (C) 2025 SUSE LLC
 use std::io;
 use std::fs;
+use std::collections::HashMap;
 
 // parse /proc/version string, e.g. Linux version 6.17.0-2-default ...
 fn host_kernel_vers_parse(kvers: &[u8]) -> io::Result<String> {
@@ -21,6 +22,25 @@ fn host_kernel_vers_parse(kvers: &[u8]) -> io::Result<String> {
 pub fn host_kernel_vers() -> io::Result<String> {
     let kvers = fs::read("/proc/version")?;
     host_kernel_vers_parse(&kvers)
+}
+
+pub fn conf_src_or_host_kernel_vers(
+    conf: &HashMap<String, String>
+) -> io::Result<String> {
+    match conf.get("KERNEL_SRC") {
+        Some(ksrc) => {
+            let b = fs::read(format!("{ksrc}/include/config/kernel.release"))?;
+            let btrimmed = match b.strip_suffix(&[b'\n']) {
+                Some(bt) => bt,
+                None => &b,
+            };
+            Ok(String::from_utf8_lossy(btrimmed).to_string())
+        },
+        None => match conf.get("KERNEL_RELEASE") {
+            Some(krel) => Ok(krel.clone()),
+            None => host_kernel_vers(),
+        },
+    }
 }
 
 #[cfg(test)]
