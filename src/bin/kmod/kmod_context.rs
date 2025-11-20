@@ -34,7 +34,7 @@ pub struct KmodContext {
     pub module_root: PathBuf,
 }
 
-fn read_lines<P: AsRef<Path>>(filename: P) -> io::Result<io::Lines<BufReader<File>>> {
+fn read_lines(filename: &Path) -> io::Result<io::Lines<BufReader<File>>> {
     let file = File::open(filename)?;
     Ok(BufReader::new(file).lines())
 }
