@@ -614,6 +614,9 @@ fn main() -> io::Result<()> {
                             .collect();
                         for dep_mod_name in all_deps {
                             if let Some(dep_mod) = context.find(dep_mod_name) {
+                                if dep_mod.status == ModuleStatus::Builtin {
+                                    continue;
+                                }
                                 if dep_mod.path.exists() {
                                     kmod_paths.insert(dep_mod.path.clone());
                                 }
