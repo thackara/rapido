@@ -383,9 +383,9 @@ pub fn archive_file<R: Read, W: Seek + Write>(
             let padded_namesize = len + fname.len() as u64 + 1;
             if padded_namesize > u64::from(state.props.namesize_max) {
                 dout!(
-                    "{} misaligned. Required padding {} exceeds namesize maximum {}.",
+                    "Suboptimal {} alignment: padded {} > {} namesize maximum",
                     path.display(),
-                    len,
+                    padded_namesize,
                     state.props.namesize_max
                 );
                 0
