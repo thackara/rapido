@@ -574,70 +574,72 @@ fn main() -> io::Result<()> {
         None => PathBuf::from("/").join(&kmod_dst_root),
     };
 
-    match KmodContext::new(&kmod_src_root) {
-        Ok(context) => {
-            let module_names: Vec<String> = state
-                .kmods
-                .names
-                .iter()
-                .map(|(name, _dst)| name.clone())
-                .collect();
-            // TODO reuse paths_seen based dedup and archive paths as they're
-            // encountered, instead of this extra HashSet?
-            let mut kmod_paths: HashSet<PathBuf> = HashSet::new();
+    let context = match KmodContext::new(&kmod_src_root) {
+        Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidInput, e)),
+        Ok(ctx) => ctx,
+    };
 
-            for name in module_names {
-                if let Some(root_mod) = context.find(&name) {
-                    if root_mod.status != ModuleStatus::Builtin {
-                        if kmod_src_root.join(&root_mod.rel_path).exists() {
-                            kmod_paths.insert(root_mod.rel_path.clone());
-                        } else {
-                            dout!(
-                                "{:?} missing from {:?}",
-                                root_mod.rel_path,
-                                kmod_src_root
-                            );
-                        }
-                        let all_deps: Vec<&String> = root_mod
-                            .hard_deps
-                            .iter()
-                            .chain(root_mod.soft_deps_pre.iter())
-                            .chain(root_mod.soft_deps_post.iter())
-                            .chain(root_mod.weak_deps.iter())
-                            .collect();
-                        for dep_mod_name in all_deps {
-                            if let Some(dep_mod) = context.find(dep_mod_name) {
-                                if dep_mod.status == ModuleStatus::Builtin {
-                                    continue;
-                                }
-                                if kmod_src_root.join(&dep_mod.rel_path).exists() {
-                                    kmod_paths.insert(dep_mod.rel_path.clone());
-                                } else {
-                                    dout!(
-                                        "{:?} (dep) missing from {:?}",
-                                        dep_mod.rel_path,
-                                        kmod_src_root
-                                    );
-                                }
-                            }
-                        }
-                    } else {
-                        dout!("{} builtin", root_mod.name);
-                    }
+    let module_names: Vec<String> = state
+        .kmods
+        .names
+        .iter()
+        .map(|(name, _dst)| name.clone())
+        .collect();
+    // TODO reuse paths_seen based dedup and archive paths as they're
+    // encountered, instead of this extra HashSet?
+    let mut kmod_paths: HashSet<PathBuf> = HashSet::new();
+
+    for name in module_names {
+        let root_mod = match context.find(&name) {
+            None => {
+                dout!("{} Module Not Found", name);
+                // TODO: flag missing modules
+                continue;
+            },
+            Some(m) if m.status == ModuleStatus::Builtin => {
+                dout!("{} builtin", m.name);
+                continue;
+            },
+            Some(m) => m,
+        };
+
+        if kmod_src_root.join(&root_mod.rel_path).exists() {
+            kmod_paths.insert(root_mod.rel_path.clone());
+        } else {
+            dout!(
+                "{:?} missing from {:?}",
+                root_mod.rel_path,
+                kmod_src_root
+            );
+        }
+        let all_deps: Vec<&String> = root_mod
+            .hard_deps
+            .iter()
+            .chain(root_mod.soft_deps_pre.iter())
+            .chain(root_mod.soft_deps_post.iter())
+            .chain(root_mod.weak_deps.iter())
+            .collect();
+        for dep_mod_name in all_deps {
+            if let Some(dep_mod) = context.find(dep_mod_name) {
+                if dep_mod.status == ModuleStatus::Builtin {
+                    continue;
+                }
+                if kmod_src_root.join(&dep_mod.rel_path).exists() {
+                    kmod_paths.insert(dep_mod.rel_path.clone());
                 } else {
-                    dout!("{} Module Not Found", name);
-                    // TODO: flag missing modules
+                    dout!(
+                        "{:?} (dep) missing from {:?}",
+                        dep_mod.rel_path,
+                        kmod_src_root
+                    );
                 }
             }
-            for rel_path in kmod_paths {
-                let path = kmod_src_root.join(&rel_path);
-                let dst_path = kmod_dst_root.join(&rel_path);
-                archive_kmod_path(&path, &dst_path, &mut cpio_state, &mut cpio_writer)?;
-            }
         }
-        Err(e) => {
-            dout!("KmodContext Initialization Error: {}", e);
-        }
+    }
+    for rel_path in kmod_paths {
+        let path = kmod_src_root.join(&rel_path);
+        let dst_path = kmod_dst_root.join(&rel_path);
+        archive_kmod_path(&path, &dst_path, &mut cpio_state, &mut cpio_writer)?;
     }
 
     let len = cpio::archive_trailer(&mut cpio_state, &mut cpio_writer)?;
