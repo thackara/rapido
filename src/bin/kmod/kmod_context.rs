@@ -94,12 +94,6 @@ impl KmodContext {
     // Parses **modules.dep** (hard dependencies and module paths).
     fn load_hard_dependencies(&mut self) -> io::Result<()> {
         let path = self.module_root.join("modules.dep");
-        if !path.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("modules.dep not found at path: {}", path.display()),
-            ));
-        }
 
         for line in read_lines(&path)? {
             let line = line?;
@@ -143,12 +137,6 @@ impl KmodContext {
     // Parses **modules.softdep**
     fn load_soft_dependencies(&mut self) -> io::Result<()> {
         let path = self.module_root.join("modules.softdep");
-        if !path.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("modules.softdep not found at path: {}", path.display()),
-            ));
-        }
 
         for line in read_lines(&path)? {
             let line = line?;
@@ -180,12 +168,6 @@ impl KmodContext {
     // Parses **modules.weakdep**.
     fn load_weak_dependencies(&mut self) -> io::Result<()> {
         let path = self.module_root.join("modules.weakdep");
-        if !path.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("modules.weakdep not found at path: {}", path.display()),
-            ));
-        }
 
         for line in read_lines(&path)? {
             let line = line?;
@@ -213,12 +195,6 @@ impl KmodContext {
     // Parses **modules.builtin**.
     fn load_builtin_modules(&mut self) -> io::Result<()> {
         let path = self.module_root.join("modules.builtin");
-        if !path.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("modules.builtin not found at path: {}", path.display()),
-            ));
-        }
 
         for line in read_lines(&path)? {
             let line = line?;
@@ -252,6 +228,7 @@ impl KmodContext {
     fn load_aliases(&mut self) -> io::Result<()> {
         let path = self.module_root.join("modules.alias");
         if !path.exists() {
+            // missing aliases not considered an error
             return Ok(());
         }
 
@@ -348,7 +325,7 @@ mod tests {
         // modules.*dep is missing (first hit load_hard_dependencies)
         match KmodContext::new(&root_path) {
             Ok(_) => panic!("Context should fail because modules.dep is missing"),
-            Err(e) => assert!(e.contains("modules.dep not found")),
+            Err(e) => assert!(e.contains("Failed to load modules.dep")),
         }
         cleanup_test_dir(&root_path);
     }
