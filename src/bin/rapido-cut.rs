@@ -15,7 +15,6 @@ use elf::endian::AnyEndian;
 use crosvm::argument::{self, Argument};
 mod kmod;
 use kmod::kmod_context::{KmodContext, ModuleStatus};
-use rapido::host_kernel_vers;
 extern crate kv_conf;
 
 // Don't print debug messages on release builds...
@@ -384,26 +383,8 @@ fn main() -> io::Result<()> {
             }
         }
         // handle no rapido.conf
+        // TODO: set defaults, considering env vars
         Err(_) => HashMap::new(),
-    };
-
-    // TODO: get release from KERNEL_SRC if set: include/config/kernel.release
-
-    let kver: String = match conf.get("KERNEL_RELEASE") {
-        Some(rel) => rel.clone(),
-        None => host_kernel_vers()?,
-    };
-    let kver_path = format!("/lib/modules/{kver}");
-
-    // get kmod_dir, falling back to /lib/modules/<kver>
-    let kmod_dir: String = match conf.get("KERNEL_INSTALL_MOD_PATH") {
-        // FIXME: KERNEL_INSTALL_MOD_PATH is the parent, under which we need
-        // to check lib/modules/<ver>.
-        Some(kmod) => kmod.clone(),
-        None => {
-            let rel_slice = host_kernel_vers()?;
-            format!("/lib/modules/{rel_slice}")
-        }
     };
 
     let cpio_out_path = match args_process(&mut state.bins.names, &mut state.kmods.names) {
@@ -582,10 +563,18 @@ fn main() -> io::Result<()> {
         state.libs.off += 1;
     }
 
-    // KmodContext initialization and usage
-    // src: replace with kv-conf KERNEL_INSTALL_MOD_PATH value
-    // dst: inside initrd it will /lib/modules/{kver}/module.path
-    match KmodContext::new(Path::new(&kmod_dir)) {
+    let krel = rapido::conf_src_or_host_kernel_vers(&conf)?;
+    // XXX: omit '/' prefix from dst so it can be reused for kmp subdir join().
+    // It would anyhow be stripped by cpio.
+    let kmod_dst_root = PathBuf::from("lib/modules/").join(&krel);
+    eprintln!("kmod_dst_root: {:?}", kmod_dst_root);
+    let kmod_src_root = match conf.get("KERNEL_INSTALL_MOD_PATH") {
+        // should assert that KERNEL_SRC is set?
+        Some(kmp) => PathBuf::from(kmp).join(&kmod_dst_root),
+        None => PathBuf::from("/").join(&kmod_dst_root),
+    };
+
+    match KmodContext::new(&kmod_src_root) {
         Ok(context) => {
             let module_names: Vec<String> = state
                 .kmods
@@ -596,19 +585,17 @@ fn main() -> io::Result<()> {
             // TODO reuse paths_seen based dedup and archive paths as they're
             // encountered, instead of this extra HashSet?
             let mut kmod_paths: HashSet<PathBuf> = HashSet::new();
-            let kmod_root_path = Path::new(&kmod_dir);
-            let kver_root_path = Path::new(&kver_path);
 
             for name in module_names {
                 if let Some(root_mod) = context.find(&name) {
                     if root_mod.status != ModuleStatus::Builtin {
-                        if kmod_root_path.join(&root_mod.rel_path).exists() {
+                        if kmod_src_root.join(&root_mod.rel_path).exists() {
                             kmod_paths.insert(root_mod.rel_path.clone());
                         } else {
                             dout!(
                                 "{:?} missing from {:?}",
                                 root_mod.rel_path,
-                                kmod_root_path
+                                kmod_src_root
                             );
                         }
                         let all_deps: Vec<&String> = root_mod
@@ -623,13 +610,13 @@ fn main() -> io::Result<()> {
                                 if dep_mod.status == ModuleStatus::Builtin {
                                     continue;
                                 }
-                                if kmod_root_path.join(&dep_mod.rel_path).exists() {
+                                if kmod_src_root.join(&dep_mod.rel_path).exists() {
                                     kmod_paths.insert(dep_mod.rel_path.clone());
                                 } else {
                                     dout!(
                                         "{:?} (dep) missing from {:?}",
                                         dep_mod.rel_path,
-                                        kmod_root_path
+                                        kmod_src_root
                                     );
                                 }
                             }
@@ -639,11 +626,12 @@ fn main() -> io::Result<()> {
                     }
                 } else {
                     dout!("{} Module Not Found", name);
+                    // TODO: flag missing modules
                 }
             }
             for rel_path in kmod_paths {
-                let path = kmod_root_path.join(&rel_path);
-                let dst_path = kver_root_path.join(&rel_path);
+                let path = kmod_src_root.join(&rel_path);
+                let dst_path = kmod_dst_root.join(&rel_path);
                 archive_kmod_path(&path, &dst_path, &mut cpio_state, &mut cpio_writer)?;
             }
         }
