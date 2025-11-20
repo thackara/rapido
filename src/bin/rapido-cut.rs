@@ -602,8 +602,14 @@ fn main() -> io::Result<()> {
             for name in module_names {
                 if let Some(root_mod) = context.find(&name) {
                     if root_mod.status != ModuleStatus::Builtin {
-                        if root_mod.path.exists() {
-                            kmod_paths.insert(root_mod.path.clone());
+                        if kmod_root_path.join(&root_mod.rel_path).exists() {
+                            kmod_paths.insert(root_mod.rel_path.clone());
+                        } else {
+                            dout!(
+                                "{:?} missing from {:?}",
+                                root_mod.rel_path,
+                                kmod_root_path
+                            );
                         }
                         let all_deps: Vec<&String> = root_mod
                             .hard_deps
@@ -617,8 +623,14 @@ fn main() -> io::Result<()> {
                                 if dep_mod.status == ModuleStatus::Builtin {
                                     continue;
                                 }
-                                if dep_mod.path.exists() {
-                                    kmod_paths.insert(dep_mod.path.clone());
+                                if kmod_root_path.join(&dep_mod.rel_path).exists() {
+                                    kmod_paths.insert(dep_mod.rel_path.clone());
+                                } else {
+                                    dout!(
+                                        "{:?} (dep) missing from {:?}",
+                                        dep_mod.rel_path,
+                                        kmod_root_path
+                                    );
                                 }
                             }
                         }
@@ -629,15 +641,9 @@ fn main() -> io::Result<()> {
                     dout!("{} Module Not Found", name);
                 }
             }
-            for path in kmod_paths {
-                let relative_path = match path.strip_prefix(kmod_root_path) {
-                    Ok(rel_path) => rel_path,
-                    Err(_) => {
-                        dout!("Error: Path structure mismatch.");
-                        continue;
-                    }
-                };
-                let dst_path = kver_root_path.join(relative_path);
+            for rel_path in kmod_paths {
+                let path = kmod_root_path.join(&rel_path);
+                let dst_path = kver_root_path.join(&rel_path);
                 archive_kmod_path(&path, &dst_path, &mut cpio_state, &mut cpio_writer)?;
             }
         }

@@ -18,7 +18,8 @@ pub enum ModuleStatus {
 pub struct KmodModule {
     pub name: String,
     pub status: ModuleStatus,
-    pub path: PathBuf,
+    // rel_path is relative to KmodContext.module_root
+    pub rel_path: PathBuf,
     pub hard_deps: Vec<String>,
     pub soft_deps_pre: Vec<String>,
     pub soft_deps_post: Vec<String>,
@@ -118,21 +119,20 @@ impl KmodContext {
                 .collect();
 
             // Insert or update module
-            let full_path = self.module_root.join(module_path_str);
             let module = self
                 .modules_hash
                 .entry(module_name.clone())
                 .or_insert_with(|| KmodModule {
                     name: module_name,
                     status: ModuleStatus::LoadableModule,
-                    path: full_path.clone(),
+                    rel_path: PathBuf::from(module_path_str),
                     hard_deps: Vec::new(),
                     soft_deps_pre: Vec::new(),
                     soft_deps_post: Vec::new(),
                     weak_deps: Vec::new(),
                 });
 
-            module.path = full_path;
+            module.rel_path = PathBuf::from(module_path_str);
             module.hard_deps = dep_names;
             module.status = ModuleStatus::LoadableModule;
         }
@@ -238,7 +238,7 @@ impl KmodContext {
                 .or_insert_with(|| KmodModule {
                     name: module_name,
                     status: ModuleStatus::Builtin,
-                    path: PathBuf::new(),
+                    rel_path: PathBuf::new(),
                     hard_deps: Vec::new(),
                     soft_deps_pre: Vec::new(),
                     soft_deps_post: Vec::new(),
@@ -401,7 +401,7 @@ mod tests {
         // Check mod_a
         let mod_a = ctx.modules_hash.get("mod_a").expect("mod_a not found");
         assert_eq!(mod_a.status, ModuleStatus::LoadableModule);
-        assert!(mod_a.path.ends_with("kernel/mod_a.ko"));
+        assert_eq!(mod_a.rel_path, Path::new("kernel/mod_a.ko"));
         assert_eq!(
             mod_a.hard_deps,
             vec!["dep1", "dep2"],
@@ -411,7 +411,7 @@ mod tests {
         // Check mod_b (normalization and no deps)
         let mod_b = ctx.modules_hash.get("mod_b").expect("mod_b not found");
         assert_eq!(mod_b.status, ModuleStatus::LoadableModule);
-        assert!(mod_b.path.ends_with("kernel/mod-b.ko"));
+        assert_eq!(mod_b.rel_path, Path::new("kernel/mod-b.ko"));
         assert!(mod_b.hard_deps.is_empty(), "mod_b should have no hard deps");
 
         cleanup_test_dir(&root_path);
@@ -428,7 +428,7 @@ mod tests {
             KmodModule {
                 name: "mod_a".to_string(),
                 status: ModuleStatus::LoadableModule,
-                path: PathBuf::new(),
+                rel_path: PathBuf::new(),
                 hard_deps: Vec::new(),
                 soft_deps_pre: Vec::new(),
                 soft_deps_post: Vec::new(),
@@ -475,7 +475,7 @@ mod tests {
             KmodModule {
                 name: "mod_a".to_string(),
                 status: ModuleStatus::LoadableModule,
-                path: PathBuf::new(),
+                rel_path: PathBuf::new(),
                 hard_deps: Vec::new(),
                 soft_deps_pre: Vec::new(),
                 soft_deps_post: Vec::new(),
@@ -487,7 +487,7 @@ mod tests {
             KmodModule {
                 name: "mod_b".to_string(),
                 status: ModuleStatus::LoadableModule,
-                path: PathBuf::new(),
+                rel_path: PathBuf::new(),
                 hard_deps: Vec::new(),
                 soft_deps_pre: Vec::new(),
                 soft_deps_post: Vec::new(),
@@ -549,7 +549,7 @@ mod tests {
             "builtin_mod1 status incorrect"
         );
         assert!(
-            mod1.path.as_os_str().is_empty(),
+            mod1.rel_path.as_os_str().is_empty(),
             "Builtin path should be empty"
         );
 
@@ -578,7 +578,7 @@ mod tests {
             KmodModule {
                 name: "mod_target".to_string(),
                 status: ModuleStatus::LoadableModule,
-                path: PathBuf::new(),
+                rel_path: PathBuf::new(),
                 hard_deps: Vec::new(),
                 soft_deps_pre: Vec::new(),
                 soft_deps_post: Vec::new(),
@@ -618,7 +618,7 @@ mod tests {
         let target_module = KmodModule {
             name: "mod_target".to_string(),
             status: ModuleStatus::LoadableModule,
-            path: PathBuf::from("kernel/target.ko"),
+            rel_path: PathBuf::from("kernel/target.ko"),
             hard_deps: vec!["dep1".to_string()],
             soft_deps_pre: Vec::new(),
             soft_deps_post: Vec::new(),
@@ -633,7 +633,7 @@ mod tests {
             KmodModule {
                 name: "builtin_mod".to_string(),
                 status: ModuleStatus::Builtin,
-                path: PathBuf::new(),
+                rel_path: PathBuf::new(),
                 hard_deps: Vec::new(),
                 soft_deps_pre: Vec::new(),
                 soft_deps_post: Vec::new(),
@@ -717,8 +717,9 @@ mod tests {
         // Check mod_a (loadable-module, hard/soft/weak dependencies)
         let mod_a = context.find("mod_a").expect("mod_a should be found");
         assert_eq!(mod_a.status, ModuleStatus::LoadableModule);
-        assert!(
-            mod_a.path.ends_with("kernel/mod_a.ko"),
+        assert_eq!(
+            mod_a.rel_path,
+            Path::new("kernel/mod_a.ko"),
             "Path should point to the module file"
         );
         assert_eq!(
@@ -745,8 +746,9 @@ mod tests {
         // Check mod_b (loadable-module, weak dep)
         let mod_b = context.find("mod_b").expect("mod_b should be found");
         assert_eq!(mod_b.status, ModuleStatus::LoadableModule);
-        assert!(
-            mod_b.path.ends_with("kernel/mod_b.ko.xz"),
+        assert_eq!(
+            mod_b.rel_path,
+            Path::new("kernel/mod_b.ko.xz"),
             "Path should point to the compressed module file"
         );
         assert_eq!(
@@ -867,10 +869,9 @@ mod tests {
             ModuleStatus::LoadableModule,
             "Resolved module status should be LoadableModule"
         );
-        assert!(
-            aliased_mod
-                .path
-                .ends_with("kernel/arch/x86/sub/mod32c-intel.ko.zst"),
+        assert_eq!(
+            aliased_mod.rel_path,
+            Path::new("kernel/arch/x86/sub/mod32c-intel.ko.zst"),
             "Resolved module path is incorrect"
         );
 

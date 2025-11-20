@@ -154,10 +154,10 @@ fn collect_module_paths(context: &KmodContext, modules: &[String]) -> Result<Vec
     let paths: HashSet<PathBuf> = collect_dependencies(context, modules)?
         .into_iter()
         // filter out built-in modules
-        .filter(|target_mod| target_mod.status != ModuleStatus::Builtin)
+        .filter(|kmod| kmod.status != ModuleStatus::Builtin)
         // filter out if path exists
-        .filter(|target_mod| target_mod.path.exists())
-        .map(|target_mod| target_mod.path)
+        .filter(|kmod| context.module_root.join(&kmod.rel_path).exists())
+        .map(|kmod| context.module_root.join(&kmod.rel_path))
         .collect();
 
     Ok(paths.into_iter().collect())
