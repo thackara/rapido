@@ -228,16 +228,39 @@ fn gather_archive_file<W: Seek + Write>(
 fn archive_kmod_path<W: Seek + Write>(
     src: &Path,
     dst: &Path,
+    paths_seen: &mut HashSet<PathBuf>,
     cpio_state: &mut cpio::ArchiveState,
-    cpio_writer: W,
+    mut cpio_writer: W,
 ) -> io::Result<()> {
     let md = fs::symlink_metadata(src)?;
-    let archive_md = cpio::ArchiveMd::from(cpio_state, &md)?;
+    let amd = cpio::ArchiveMd::from(cpio_state, &md)?;
+    // mock up md to use for any parent directories. 0111: allow traversal
+    let parent_dirs_amd = cpio::ArchiveMd{
+        mode: match amd.mode & cpio::S_IFMT {
+            cpio::S_IFDIR => amd.mode,
+            _ => (amd.mode & !cpio::S_IFMT) | cpio::S_IFDIR | 0o111,
+        },
+        nlink: 2,
+        rmajor: 0,
+        rminor: 0,
+        len: 0,
+        ..amd
+    };
+
+    gather_archive_dirs(
+        // TODO we should be able to avoid the extra copy here
+        PathBuf::from("/").join(&dst).parent(),
+        &parent_dirs_amd,
+        paths_seen,
+        cpio_state,
+        &mut cpio_writer
+    )?;
+
     let kmod_f = fs::File::open(src)?;
     cpio::archive_file(
         cpio_state,
         dst,
-        &archive_md,
+        &amd,
         &kmod_f,
         cpio_writer,
     )?;
@@ -603,7 +626,13 @@ fn main() -> io::Result<()> {
         let kmod_dst = kmod_dst_root.join(&root_mod.rel_path);
         if paths_seen.insert(kmod_dst.clone()) {
             let kmod_src = kmod_src_root.join(root_mod.rel_path);
-            archive_kmod_path(&kmod_src, &kmod_dst, &mut cpio_state, &mut cpio_writer)?;
+            archive_kmod_path(
+                &kmod_src,
+                &kmod_dst,
+                &mut paths_seen,
+                &mut cpio_state,
+                &mut cpio_writer
+            )?;
         } else {
             dout!("skipping duplicate kmod {:?} and all deps", &kmod_dst);
             continue;
@@ -624,7 +653,13 @@ fn main() -> io::Result<()> {
             let kmod_dst = kmod_dst_root.join(&m.rel_path);
             if paths_seen.insert(kmod_dst.clone()) {
                 let kmod_src = kmod_src_root.join(m.rel_path);
-                archive_kmod_path(&kmod_src, &kmod_dst, &mut cpio_state, &mut cpio_writer)?;
+                archive_kmod_path(
+                    &kmod_src,
+                    &kmod_dst,
+                    &mut paths_seen,
+                    &mut cpio_state,
+                    &mut cpio_writer
+                )?;
             } else {
                 dout!("skipping duplicate kmod {:?}", &kmod_dst);
             }
@@ -649,6 +684,7 @@ fn main() -> io::Result<()> {
                 match archive_kmod_path(
                     &kmod_src,
                     &kmod_dst,
+                    &mut paths_seen,
                     &mut cpio_state,
                     &mut cpio_writer
                 ) {
