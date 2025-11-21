@@ -579,18 +579,18 @@ fn main() -> io::Result<()> {
         Ok(ctx) => ctx,
     };
 
-    let module_names: Vec<String> = state
+    let module_names: Vec<&String> = state
         .kmods
         .names
         .iter()
-        .map(|(name, _dst)| name.clone())
+        .map(|(name, _dst)| name)
         .collect();
     // TODO reuse paths_seen based dedup and archive paths as they're
     // encountered, instead of this extra HashSet?
     let mut kmod_paths: HashSet<PathBuf> = HashSet::new();
 
     for name in module_names {
-        let root_mod = match context.find(&name) {
+        let root_mod = match context.find(name) {
             None => {
                 dout!("{} Module Not Found", name);
                 // TODO: flag missing modules
