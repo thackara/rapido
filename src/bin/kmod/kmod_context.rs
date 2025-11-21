@@ -106,6 +106,7 @@ impl KmodContext {
             let module_name = extract_module_name(module_path_str);
 
             // Collect dependency names
+            // TODO: keep paths and generate hard_deps on demand as impl
             let dep_names: Vec<String> = parts[1]
                 .trim()
                 .split_whitespace()
@@ -113,6 +114,7 @@ impl KmodContext {
                 .collect();
 
             // Insert or update module
+            // TODO: we should never have an existing entry on first load!
             let module = self
                 .modules_hash
                 .entry(module_name.clone())
