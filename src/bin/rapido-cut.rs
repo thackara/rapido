@@ -583,10 +583,6 @@ fn main() -> io::Result<()> {
         Ok(ctx) => ctx,
     };
 
-    // TODO reuse paths_seen based dedup and archive paths as they're
-    // encountered, instead of this extra HashSet?
-    let mut kmod_paths: HashSet<PathBuf> = HashSet::new();
-
     for (name, _) in state.kmods.names.iter() {
         let root_mod = match context.find(name) {
             None => {
@@ -604,18 +600,34 @@ fn main() -> io::Result<()> {
         // Fail if root mod or hard deps are missing.
         // No recursive checking here; modules.dep entry is complete
         // and doesn't contain Builtins.
-        kmod_paths.insert(root_mod.rel_path.clone());
+        let kmod_dst = kmod_dst_root.join(&root_mod.rel_path);
+        if paths_seen.insert(kmod_dst.clone()) {
+            let kmod_src = kmod_src_root.join(root_mod.rel_path);
+            archive_kmod_path(&kmod_src, &kmod_dst, &mut cpio_state, &mut cpio_writer)?;
+        } else {
+            dout!("skipping duplicate kmod {:?} and all deps", &kmod_dst);
+            continue;
+        }
+
         for dep_mod in root_mod.hard_deps.iter() {
             // XXX would be faster to use modules.dep path entries directly
-            match context.find(dep_mod) {
+            let m = match context.find(dep_mod) {
                 None => return Err(
                             io::Error::new(
                                 io::ErrorKind::InvalidData,
                                 format!("failed to resolve path for {dep_mod}")
                             )
                         ),
-                Some(m) => kmod_paths.insert(m.rel_path.clone()),
+                Some(m) => m,
             };
+
+            let kmod_dst = kmod_dst_root.join(&m.rel_path);
+            if paths_seen.insert(kmod_dst.clone()) {
+                let kmod_src = kmod_src_root.join(m.rel_path);
+                archive_kmod_path(&kmod_src, &kmod_dst, &mut cpio_state, &mut cpio_writer)?;
+            } else {
+                dout!("skipping duplicate kmod {:?}", &kmod_dst);
+            }
         }
 
         // Attempt to pull in soft and weak dependencies for root_mod.
@@ -623,26 +635,34 @@ fn main() -> io::Result<()> {
         for soft_mod in root_mod.soft_deps_pre.iter()
             .chain(root_mod.soft_deps_post.iter())
             .chain(root_mod.weak_deps.iter()) {
-            if let Some(dep_mod) = context.find(soft_mod) {
-                if dep_mod.status == ModuleStatus::Builtin {
+            let m = match context.find(soft_mod) {
+                None => {
+                    dout!("{:?} soft / weak kernel dep not found", soft_mod);
                     continue;
+                },
+                Some(m) if m.status == ModuleStatus::Builtin => continue,
+                Some(m) => m,
+            };
+            let kmod_dst = kmod_dst_root.join(&m.rel_path);
+            if paths_seen.insert(kmod_dst.clone()) {
+                let kmod_src = kmod_src_root.join(m.rel_path);
+                match archive_kmod_path(
+                    &kmod_src,
+                    &kmod_dst,
+                    &mut cpio_state,
+                    &mut cpio_writer
+                ) {
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                        dout!("{:?} soft / weak kernel dep missing", &kmod_src);
+                        continue;
+                    },
+                    Err(e) => return Err(e),
+                    Ok(_) => {},
                 }
-                if kmod_src_root.join(&dep_mod.rel_path).exists() {
-                    kmod_paths.insert(dep_mod.rel_path.clone());
-                } else {
-                    dout!(
-                        "{:?} soft / weak kernel dep missing from {:?}",
-                        dep_mod.rel_path,
-                        kmod_src_root
-                    );
-                }
+            } else {
+                dout!("skipping duplicate kmod {:?}", &kmod_dst);
             }
         }
-    }
-    for rel_path in kmod_paths {
-        let path = kmod_src_root.join(&rel_path);
-        let dst_path = kmod_dst_root.join(&rel_path);
-        archive_kmod_path(&path, &dst_path, &mut cpio_state, &mut cpio_writer)?;
     }
 
     let len = cpio::archive_trailer(&mut cpio_state, &mut cpio_writer)?;
