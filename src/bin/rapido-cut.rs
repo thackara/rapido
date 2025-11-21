@@ -66,7 +66,11 @@ fn path_stat(name: &str, search_paths: &[&str]) -> Option<Fsent> {
 
 // Parse ELF NEEDED entries to gather shared object dependencies
 // This function intentionally ignores any DT_RPATH paths.
-fn elf_deps(f: &fs::File, path: &Path, dups_filter: &mut HashMap<String, u64>) -> Result<Vec<(String, Option<String>)>, io::Error> {
+fn elf_deps(
+    f: &fs::File,
+    path: &Path,
+    dups_filter: &mut HashSet<String>
+) -> Result<Vec<(String, Option<String>)>, io::Error> {
     let mut ret: Vec<(String, Option<String>)> = vec![];
 
     let mut file = match ElfStream::<AnyEndian, _>::open_stream(f) {
@@ -121,7 +125,7 @@ fn elf_deps(f: &fs::File, path: &Path, dups_filter: &mut HashMap<String, u64>) -
         match dynsyms_strs.get(str_off) {
             Ok(sraw) => {
                 let s = sraw.to_string();
-                if *dups_filter.entry(s.clone()).and_modify(|s| *s += 1).or_insert(1) == 1 {
+                if dups_filter.insert(s.clone()) {
                     dout!("new elf dependency({:?}): {:?}", str_off, s);
                     ret.push((s, None));
                 } else {
@@ -143,7 +147,7 @@ fn elf_deps(f: &fs::File, path: &Path, dups_filter: &mut HashMap<String, u64>) -
 fn gather_archive_dirs<W: Seek + Write>(
     path: Option<&Path>,
     parent_dirs_amd: &cpio::ArchiveMd,
-    paths_seen: &mut HashMap<PathBuf, u64>,
+    paths_seen: &mut HashSet<PathBuf>,
     cpio_state: &mut cpio::ArchiveState,
     mut cpio_writer: W,
 ) -> io::Result<()> {
@@ -159,7 +163,7 @@ fn gather_archive_dirs<W: Seek + Write>(
         panic!("non-absolute path, check path_stat and dst paths");
     }
 
-    if paths_seen.get(p).is_some() {
+    if paths_seen.contains(p) {
         dout!("ignoring seen directory and parents: {:?}", p);
         return Ok(());
     }
@@ -179,7 +183,7 @@ fn gather_archive_dirs<W: Seek + Write>(
             Component::Normal(c) => here.push(c),
         }
 
-        if *paths_seen.entry(here.clone()).and_modify(|s| *s += 1).or_insert(1) > 1 {
+        if !paths_seen.insert(here.clone()) {
             dout!("ignoring seen directory: {:?}", here);
             continue;
         }
@@ -197,7 +201,7 @@ fn gather_archive_file<W: Seek + Write>(
     amd: &cpio::ArchiveMd,
     mode_mask: Option<u32>,
     libs_names: &mut Vec<(String, Option<String>)>,
-    libs_seen: &mut HashMap<String, u64>,
+    libs_seen: &mut HashSet<String>,
     cpio_state: &mut cpio::ArchiveState,
     mut cpio_writer: W,
 ) -> io::Result<()> {
@@ -410,9 +414,9 @@ fn main() -> io::Result<()> {
     let mut cpio_writer = io::BufWriter::new(cpio_f);
 
     // @libs_seen is an optimization to avoid resolving already-seen elf deps.
-    let mut libs_seen: HashMap<String, u64> = HashMap::new();
+    let mut libs_seen: HashSet<String> = HashSet::new();
     // avoid archiving already-archived paths
-    let mut paths_seen: HashMap<PathBuf, u64> = HashMap::new();
+    let mut paths_seen: HashSet<PathBuf> = HashSet::new();
 
     // process bins first, as they may add to libs *and* bins
     while let Some((bin_src, bin_dst)) = state.bins.names.get(state.bins.off) {
