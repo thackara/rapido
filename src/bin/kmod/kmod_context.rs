@@ -6,6 +6,26 @@ use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 use std::path::PathBuf;
 
+// --- Constants ---
+
+pub const MODULE_DB_FILES: [&str; 15] = [
+    "modules.dep",
+    "modules.dep.bin",
+    "modules.alias",
+    "modules.alias.bin",
+    "modules.softdep",
+    "modules.weakdep",
+    "modules.builtin",
+    "modules.builtin.bin",
+    "modules.builtin.alias.bin",
+    "modules.builtin.modinfo",
+    "modules.symbols",
+    "modules.symbols.bin",
+    "modules.order",
+    "modules.fips",
+    "modules.devname",
+];
+
 // --- Module Data Structures ---
 
 #[derive(Debug, Clone, PartialEq, Eq)]

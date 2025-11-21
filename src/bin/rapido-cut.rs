@@ -14,7 +14,7 @@ use elf::endian::AnyEndian;
 
 use crosvm::argument::{self, Argument};
 mod kmod;
-use kmod::kmod_context::{KmodContext, ModuleStatus};
+use kmod::kmod_context::{KmodContext, ModuleStatus, MODULE_DB_FILES};
 extern crate kv_conf;
 
 // Don't print debug messages on release builds...
@@ -693,6 +693,30 @@ fn main() -> io::Result<()> {
                 }
             } else {
                 dout!("skipping duplicate kmod {:?}", &kmod_dst);
+            }
+        }
+
+        // add module_data_paths inside initrd
+        for file_name in MODULE_DB_FILES.iter() {
+            let data_src_path = kmod_src_root.join(file_name);
+            if data_src_path.is_file() {
+                let data_dst_path = kmod_dst_root.join(file_name);
+                if paths_seen.insert(data_dst_path.clone()) {
+                    match archive_kmod_path(
+                        &data_src_path,
+                        &data_dst_path,
+                        &mut paths_seen,
+                        &mut cpio_state,
+                        &mut cpio_writer
+                    ) {
+                        Err(e) => {
+                            dout!("Failed to archive module data path {:?}: {}", &data_src_path, e);
+                        },
+                        Ok(_) => {},
+                    }
+                }
+            } else {
+                dout!("Module data path {} not found on host", data_src_path.display());
             }
         }
     }
