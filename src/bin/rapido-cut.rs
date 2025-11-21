@@ -248,8 +248,7 @@ fn archive_kmod_path<W: Seek + Write>(
     };
 
     gather_archive_dirs(
-        // TODO we should be able to avoid the extra copy here
-        PathBuf::from("/").join(&dst).parent(),
+        dst.parent(),
         &parent_dirs_amd,
         paths_seen,
         cpio_state,
@@ -591,14 +590,11 @@ fn main() -> io::Result<()> {
     }
 
     let krel = rapido::conf_src_or_host_kernel_vers(&conf)?;
-    // XXX: omit '/' prefix from dst so it can be reused for kmp subdir join().
-    // It would anyhow be stripped by cpio.
-    let kmod_dst_root = PathBuf::from("lib/modules/").join(&krel);
-    eprintln!("kmod_dst_root: {:?}", kmod_dst_root);
+    let kmod_dst_root = PathBuf::from("/lib/modules/").join(&krel);
     let kmod_src_root = match conf.get("KERNEL_INSTALL_MOD_PATH") {
         // should assert that KERNEL_SRC is set?
-        Some(kmp) => PathBuf::from(kmp).join(&kmod_dst_root),
-        None => PathBuf::from("/").join(&kmod_dst_root),
+        Some(kmp) => PathBuf::from(kmp).join(format!("lib/modules/{krel}")),
+        None => kmod_dst_root.clone(),
     };
 
     let context = match KmodContext::new(&kmod_src_root) {
