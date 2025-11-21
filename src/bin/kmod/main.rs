@@ -2,12 +2,11 @@
 // Copyright (C) 2025 SUSE S.A.
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 
 mod kmod_context;
-use kmod_context::{KmodContext, KmodModule, ModuleStatus};
+use kmod_context::{KmodContext, KmodModule, ModuleStatus, MODULE_DB_FILES};
 
 struct CliArgs {
     pub module_names: Vec<String>,
@@ -167,40 +166,10 @@ fn collect_module_data_paths(context: &KmodContext) -> Result<Vec<PathBuf>, Stri
     let root = &context.module_root;
     let mut paths: Vec<PathBuf> = Vec::new();
 
-    match fs::read_dir(root) {
-        Ok(entries) => {
-            for entry in entries {
-                let entry = match entry {
-                    Ok(e) => e,
-                    Err(e) => {
-                        eprintln!(
-                            "Warning: Could not read directory entry in {}: {}",
-                            root.display(),
-                            e
-                        );
-                        continue;
-                    }
-                };
-
-                let path = entry.path();
-
-                if path.is_file() {
-                    if let Some(file_name) = path.file_name() {
-                        if let Some(file_name_str) = file_name.to_str() {
-                            if file_name_str.starts_with("modules.") {
-                                paths.push(path.clone());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Err(e) => {
-            return Err(format!(
-                "Failed to read module root directory {}: {}",
-                root.display(),
-                e
-            ));
+    for file_name in MODULE_DB_FILES.iter() {
+        let path = root.join(file_name);
+        if path.is_file() {
+            paths.push(path);
         }
     }
 
