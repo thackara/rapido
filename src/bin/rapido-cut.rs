@@ -583,17 +583,11 @@ fn main() -> io::Result<()> {
         Ok(ctx) => ctx,
     };
 
-    let module_names: Vec<&String> = state
-        .kmods
-        .names
-        .iter()
-        .map(|(name, _dst)| name)
-        .collect();
     // TODO reuse paths_seen based dedup and archive paths as they're
     // encountered, instead of this extra HashSet?
     let mut kmod_paths: HashSet<PathBuf> = HashSet::new();
 
-    for name in module_names {
+    for (name, _) in state.kmods.names.iter() {
         let root_mod = match context.find(name) {
             None => {
                 dout!("{} Module Not Found", name);
@@ -607,24 +601,29 @@ fn main() -> io::Result<()> {
             Some(m) => m,
         };
 
-        if kmod_src_root.join(&root_mod.rel_path).exists() {
-            kmod_paths.insert(root_mod.rel_path.clone());
-        } else {
-            dout!(
-                "{:?} missing from {:?}",
-                root_mod.rel_path,
-                kmod_src_root
-            );
+        // Fail if root mod or hard deps are missing.
+        // No recursive checking here; modules.dep entry is complete
+        // and doesn't contain Builtins.
+        kmod_paths.insert(root_mod.rel_path.clone());
+        for dep_mod in root_mod.hard_deps.iter() {
+            // XXX would be faster to use modules.dep path entries directly
+            match context.find(dep_mod) {
+                None => return Err(
+                            io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                format!("failed to resolve path for {dep_mod}")
+                            )
+                        ),
+                Some(m) => kmod_paths.insert(m.rel_path.clone()),
+            };
         }
-        let all_deps: Vec<&String> = root_mod
-            .hard_deps
-            .iter()
-            .chain(root_mod.soft_deps_pre.iter())
+
+        // Attempt to pull in soft and weak dependencies for root_mod.
+        // Not sure if we should be checking root_mod dependents.
+        for soft_mod in root_mod.soft_deps_pre.iter()
             .chain(root_mod.soft_deps_post.iter())
-            .chain(root_mod.weak_deps.iter())
-            .collect();
-        for dep_mod_name in all_deps {
-            if let Some(dep_mod) = context.find(dep_mod_name) {
+            .chain(root_mod.weak_deps.iter()) {
+            if let Some(dep_mod) = context.find(soft_mod) {
                 if dep_mod.status == ModuleStatus::Builtin {
                     continue;
                 }
@@ -632,7 +631,7 @@ fn main() -> io::Result<()> {
                     kmod_paths.insert(dep_mod.rel_path.clone());
                 } else {
                     dout!(
-                        "{:?} (dep) missing from {:?}",
+                        "{:?} soft / weak kernel dep missing from {:?}",
                         dep_mod.rel_path,
                         kmod_src_root
                     );
