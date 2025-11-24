@@ -135,23 +135,23 @@ impl KmodContext {
                 .map(|p| extract_module_name(p))
                 .collect();
 
-            // Insert or update module
-            // TODO: we should never have an existing entry on first load!
-            let module = self
-                .modules_hash
-                .entry(module_name)
-                .or_insert_with(|| KmodModule {
-                    status: ModuleStatus::LoadableModule,
-                    rel_path: PathBuf::from(module_path_str),
-                    hard_deps: Vec::new(),
-                    soft_deps_pre: Vec::new(),
-                    soft_deps_post: Vec::new(),
-                    weak_deps: Vec::new(),
-                });
-
-            module.rel_path = PathBuf::from(module_path_str);
-            module.hard_deps = dep_names;
-            module.status = ModuleStatus::LoadableModule;
+            match self.modules_hash.insert(module_name, KmodModule {
+                status: ModuleStatus::LoadableModule,
+                rel_path: PathBuf::from(module_path_str),
+                hard_deps: dep_names,
+                soft_deps_pre: Vec::new(),
+                soft_deps_post: Vec::new(),
+                weak_deps: Vec::new(),
+            }) {
+                // modules.dep and modules.builtin entries should be unique
+                Some(_) => return Err(
+                            io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                format!("duplicate entry: {:?}", module_path_str)
+                            )
+                ),
+                None => {},
+            };
         }
 
         Ok(())
@@ -227,22 +227,24 @@ impl KmodContext {
                 continue;
             }
 
-            // Extract module name from path
             let module_name = extract_module_name(path_str);
-
-            // update its status
-            let module = self
-                .modules_hash
-                .entry(module_name)
-                .or_insert_with(|| KmodModule {
-                    status: ModuleStatus::Builtin,
-                    rel_path: PathBuf::new(),
-                    hard_deps: Vec::new(),
-                    soft_deps_pre: Vec::new(),
-                    soft_deps_post: Vec::new(),
-                    weak_deps: Vec::new(),
-                });
-            module.status = ModuleStatus::Builtin;
+            match self.modules_hash.insert(module_name, KmodModule {
+                status: ModuleStatus::Builtin,
+                rel_path: PathBuf::new(),
+                hard_deps: Vec::new(),
+                soft_deps_pre: Vec::new(),
+                soft_deps_post: Vec::new(),
+                weak_deps: Vec::new(),
+            }) {
+                // modules.dep and modules.builtin entries should be unique
+                Some(_) => return Err(
+                            io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                format!("duplicate entry: {:?}", path_str)
+                            )
+                ),
+                None => {},
+            };
         }
         Ok(())
     }
@@ -417,6 +419,24 @@ mod tests {
     }
 
     #[test]
+    fn test_load_harddeps_dup() {
+        let root_path = setup_test_dir("harddeps_dup");
+        let mut ctx = set_context(&root_path);
+
+        // define modules and hard dependencies
+        let modules_dep_content = format!(
+            "kernel/mod_a.ko: kernel/dep1.ko kernel/dep2.ko.xz\n\
+             kernel/mod_b.ko: kernel/dep1.ko\n\
+             kernel/mod-a.ko:\n" // duplicate entry for mod_a
+        );
+        write_test_file(&root_path, "modules.dep", &modules_dep_content);
+        assert_eq!(
+            ctx.load_hard_dependencies().unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
     fn test_load_softdeps() {
         let root_path = setup_test_dir("softdeps");
         let mut ctx = set_context(&root_path);
@@ -561,6 +581,31 @@ mod tests {
         );
 
         cleanup_test_dir(&root_path);
+    }
+
+    #[test]
+    fn test_load_harddeps_builtin_dup() {
+        let root_path = setup_test_dir("harddeps_builtin_dup");
+        let mut ctx = set_context(&root_path);
+
+        let modules_dep_content = format!(
+            "kernel/mod_a.ko: kernel/dep1.ko kernel/dep2.ko.xz\n\
+             kernel/mod_b.ko: kernel/dep1.ko\n"
+        );
+        write_test_file(&root_path, "modules.dep", &modules_dep_content);
+
+        // builtin mod_b collides with modules.dep entry
+        let modules_builtin_content = format!(
+            "kernel/builtin_mod1.ko\n\
+             kernel/mod_b.ko\n"
+        );
+        write_test_file(&root_path, "modules.builtin", &modules_builtin_content);
+
+        ctx.load_hard_dependencies().unwrap();
+        assert_eq!(
+            ctx.load_builtin_modules().unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
     }
 
     #[test]
