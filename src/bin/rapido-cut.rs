@@ -32,6 +32,18 @@ struct Fsent {
     md: fs::Metadata,
 }
 
+struct Gather {
+    // The names tuple is (host-source-path, Option<initramfs-destination).
+    // If Option is None then the destination path will match the source.
+    // Dependencies (elf, kmod, etc.) are added to the end of the gather
+    // list as they are found.
+    names: Vec<(String, Option<String>)>,
+    // offset that we are currently processing
+    off: usize,
+    // @names offset which couldn't be found
+    missing: Vec<usize>,
+}
+
 const BIN_PATHS: [&str; 2] = [ "/usr/bin", "/usr/sbin" ];
 const LIB_PATHS: [&str; 2] = [ "/usr/lib64", "/usr/lib" ];
 
@@ -267,6 +279,145 @@ fn archive_kmod_path<W: Seek + Write>(
     Ok(())
 }
 
+fn gather_archive_kmods<W: Seek + Write>(
+    conf: &HashMap<String, String>,
+    kmods: &Gather,
+    paths_seen: &mut HashSet<PathBuf>,
+    cpio_state: &mut cpio::ArchiveState,
+    mut cpio_writer: W,
+) -> io::Result<()> {
+    let krel = rapido::conf_src_or_host_kernel_vers(&conf)?;
+    let kmod_dst_root = PathBuf::from("/lib/modules/").join(&krel);
+    let kmod_src_root = match conf.get("KERNEL_INSTALL_MOD_PATH") {
+        // should assert that KERNEL_SRC is set?
+        Some(kmp) => PathBuf::from(kmp).join(format!("lib/modules/{krel}")),
+        None => kmod_dst_root.clone(),
+    };
+
+    let context = match KmodContext::new(&kmod_src_root) {
+        Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidInput, e)),
+        Ok(ctx) => ctx,
+    };
+
+    for (name, _) in kmods.names.iter() {
+        let root_mod = match context.find(name) {
+            None => {
+                dout!("{} Module Not Found", name);
+                // TODO: flag missing modules
+                continue;
+            },
+            Some(m) if m.status == ModuleStatus::Builtin => {
+                dout!("{} builtin", name);
+                continue;
+            },
+            Some(m) => m,
+        };
+
+        // Fail if root mod or hard deps are missing.
+        // No recursive checking here; modules.dep entry is complete
+        // and doesn't contain Builtins.
+        let kmod_dst = kmod_dst_root.join(&root_mod.rel_path);
+        if paths_seen.insert(kmod_dst.clone()) {
+            let kmod_src = kmod_src_root.join(root_mod.rel_path);
+            archive_kmod_path(
+                &kmod_src,
+                &kmod_dst,
+                paths_seen,
+                cpio_state,
+                &mut cpio_writer
+            )?;
+        } else {
+            dout!("skipping duplicate kmod {:?} and all deps", &kmod_dst);
+            continue;
+        }
+
+        for dep_mod in root_mod.hard_deps.iter() {
+            // XXX would be faster to use modules.dep path entries directly
+            let m = match context.find(dep_mod) {
+                None => return Err(
+                            io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                format!("failed to resolve path for {dep_mod}")
+                            )
+                        ),
+                Some(m) => m,
+            };
+
+            let kmod_dst = kmod_dst_root.join(&m.rel_path);
+            if paths_seen.insert(kmod_dst.clone()) {
+                let kmod_src = kmod_src_root.join(m.rel_path);
+                archive_kmod_path(
+                    &kmod_src,
+                    &kmod_dst,
+                    paths_seen,
+                    cpio_state,
+                    &mut cpio_writer
+                )?;
+            } else {
+                dout!("skipping duplicate kmod {:?}", &kmod_dst);
+            }
+        }
+
+        // Attempt to pull in soft and weak dependencies for root_mod.
+        // Not sure if we should be checking root_mod dependents.
+        for soft_mod in root_mod.soft_deps_pre.iter()
+            .chain(root_mod.soft_deps_post.iter())
+            .chain(root_mod.weak_deps.iter()) {
+            let m = match context.find(soft_mod) {
+                None => {
+                    dout!("{:?} soft / weak kernel dep not found", soft_mod);
+                    continue;
+                },
+                Some(m) if m.status == ModuleStatus::Builtin => continue,
+                Some(m) => m,
+            };
+            let kmod_dst = kmod_dst_root.join(&m.rel_path);
+            if paths_seen.insert(kmod_dst.clone()) {
+                let kmod_src = kmod_src_root.join(m.rel_path);
+                match archive_kmod_path(
+                    &kmod_src,
+                    &kmod_dst,
+                    paths_seen,
+                    cpio_state,
+                    &mut cpio_writer
+                ) {
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                        dout!("{:?} soft / weak kernel dep missing", &kmod_src);
+                        continue;
+                    },
+                    Err(e) => return Err(e),
+                    Ok(_) => {},
+                }
+            } else {
+                dout!("skipping duplicate kmod {:?}", &kmod_dst);
+            }
+        }
+    }
+
+    // add module_data_paths inside initrd
+    for file_name in MODULE_DB_FILES.iter() {
+        let data_dst_path = kmod_dst_root.join(file_name);
+        if paths_seen.insert(data_dst_path.clone()) {
+            let data_src_path = kmod_src_root.join(file_name);
+            match archive_kmod_path(
+                &data_src_path,
+                &data_dst_path,
+                paths_seen,
+                cpio_state,
+                &mut cpio_writer
+            ) {
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                    dout!("Module data path {:?} missing", data_src_path);
+                },
+                Err(e) => return Err(e),
+                Ok(_) => {},
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn args_usage(params: &[Argument]) {
     argument::print_help("rapido-cut", "OUTPUT", params);
 }
@@ -351,18 +502,6 @@ fn args_process(
 }
 
 fn main() -> io::Result<()> {
-    struct Gather {
-        // The names tuple is (host-source-path, Option<initramfs-destination).
-        // If Option is None then the destination path will match the source.
-        // Dependencies (elf, kmod, etc.) are added to the end of the gather
-        // list as they are found.
-        names: Vec<(String, Option<String>)>,
-        // offset that we are currently processing
-        off: usize,
-        // @names offset which couldn't be found
-        missing: Vec<usize>,
-    }
-
     struct State {
         bins: Gather,
         libs: Gather,
@@ -591,134 +730,13 @@ fn main() -> io::Result<()> {
         state.libs.off += 1;
     }
 
-    let krel = rapido::conf_src_or_host_kernel_vers(&conf)?;
-    let kmod_dst_root = PathBuf::from("/lib/modules/").join(&krel);
-    let kmod_src_root = match conf.get("KERNEL_INSTALL_MOD_PATH") {
-        // should assert that KERNEL_SRC is set?
-        Some(kmp) => PathBuf::from(kmp).join(format!("lib/modules/{krel}")),
-        None => kmod_dst_root.clone(),
-    };
-
-    let context = match KmodContext::new(&kmod_src_root) {
-        Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidInput, e)),
-        Ok(ctx) => ctx,
-    };
-
-    for (name, _) in state.kmods.names.iter() {
-        let root_mod = match context.find(name) {
-            None => {
-                dout!("{} Module Not Found", name);
-                // TODO: flag missing modules
-                continue;
-            },
-            Some(m) if m.status == ModuleStatus::Builtin => {
-                dout!("{} builtin", name);
-                continue;
-            },
-            Some(m) => m,
-        };
-
-        // Fail if root mod or hard deps are missing.
-        // No recursive checking here; modules.dep entry is complete
-        // and doesn't contain Builtins.
-        let kmod_dst = kmod_dst_root.join(&root_mod.rel_path);
-        if paths_seen.insert(kmod_dst.clone()) {
-            let kmod_src = kmod_src_root.join(root_mod.rel_path);
-            archive_kmod_path(
-                &kmod_src,
-                &kmod_dst,
-                &mut paths_seen,
-                &mut cpio_state,
-                &mut cpio_writer
-            )?;
-        } else {
-            dout!("skipping duplicate kmod {:?} and all deps", &kmod_dst);
-            continue;
-        }
-
-        for dep_mod in root_mod.hard_deps.iter() {
-            // XXX would be faster to use modules.dep path entries directly
-            let m = match context.find(dep_mod) {
-                None => return Err(
-                            io::Error::new(
-                                io::ErrorKind::InvalidData,
-                                format!("failed to resolve path for {dep_mod}")
-                            )
-                        ),
-                Some(m) => m,
-            };
-
-            let kmod_dst = kmod_dst_root.join(&m.rel_path);
-            if paths_seen.insert(kmod_dst.clone()) {
-                let kmod_src = kmod_src_root.join(m.rel_path);
-                archive_kmod_path(
-                    &kmod_src,
-                    &kmod_dst,
-                    &mut paths_seen,
-                    &mut cpio_state,
-                    &mut cpio_writer
-                )?;
-            } else {
-                dout!("skipping duplicate kmod {:?}", &kmod_dst);
-            }
-        }
-
-        // Attempt to pull in soft and weak dependencies for root_mod.
-        // Not sure if we should be checking root_mod dependents.
-        for soft_mod in root_mod.soft_deps_pre.iter()
-            .chain(root_mod.soft_deps_post.iter())
-            .chain(root_mod.weak_deps.iter()) {
-            let m = match context.find(soft_mod) {
-                None => {
-                    dout!("{:?} soft / weak kernel dep not found", soft_mod);
-                    continue;
-                },
-                Some(m) if m.status == ModuleStatus::Builtin => continue,
-                Some(m) => m,
-            };
-            let kmod_dst = kmod_dst_root.join(&m.rel_path);
-            if paths_seen.insert(kmod_dst.clone()) {
-                let kmod_src = kmod_src_root.join(m.rel_path);
-                match archive_kmod_path(
-                    &kmod_src,
-                    &kmod_dst,
-                    &mut paths_seen,
-                    &mut cpio_state,
-                    &mut cpio_writer
-                ) {
-                    Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                        dout!("{:?} soft / weak kernel dep missing", &kmod_src);
-                        continue;
-                    },
-                    Err(e) => return Err(e),
-                    Ok(_) => {},
-                }
-            } else {
-                dout!("skipping duplicate kmod {:?}", &kmod_dst);
-            }
-        }
-    }
-
-    // add module_data_paths inside initrd
-    for file_name in MODULE_DB_FILES.iter() {
-        let data_dst_path = kmod_dst_root.join(file_name);
-        if paths_seen.insert(data_dst_path.clone()) {
-            let data_src_path = kmod_src_root.join(file_name);
-            match archive_kmod_path(
-                &data_src_path,
-                &data_dst_path,
-                &mut paths_seen,
-                &mut cpio_state,
-                &mut cpio_writer
-            ) {
-                Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                    dout!("Module data path {:?} missing", data_src_path);
-                },
-                Err(e) => return Err(e),
-                Ok(_) => {},
-            }
-        }
-    }
+    gather_archive_kmods(
+        &conf,
+        &state.kmods,
+        &mut paths_seen,
+        &mut cpio_state,
+        &mut cpio_writer
+    )?;
 
     let len = cpio::archive_trailer(&mut cpio_state, &mut cpio_writer)?;
     cpio_writer.flush()?;
