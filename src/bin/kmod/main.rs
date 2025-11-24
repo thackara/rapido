@@ -67,7 +67,7 @@ fn print_dep_line(dep_mod: KmodModule, prefix: &str) {
     };
     println!(
         "  {dep_icon} {prefix}: {} ({:?})",
-        dep_mod.name, dep_mod.status
+        dep_mod.name(), dep_mod.status
     );
 }
 
@@ -80,7 +80,7 @@ fn print_direct_deps(context: &KmodContext, root_name: &str) {
         }
     };
 
-    println!("🔗 {} ({:?})", root_mod.name, root_mod.status);
+    println!("🔗 {} ({:?})", root_mod.name(), root_mod.status);
 
     for dep_mod_name in &root_mod.hard_deps {
         if let Some(dep_mod) = context.find(dep_mod_name) {
@@ -143,7 +143,7 @@ fn collect_dependencies(
                     collected.entry(dep_mod_name.clone()).or_insert(dep_mod);
                 }
             }
-            collected.entry(kmodule.name.clone()).or_insert(kmodule);
+            collected.entry(kmodule.name()).or_insert(kmodule);
         }
     }
     Ok(collected.into_values().collect())
@@ -230,7 +230,7 @@ fn main() {
                         modules.len()
                     );
                     for module in modules {
-                        println!("  - {}: {:?}", module.name, module.status);
+                        println!("  - {}: {:?}", module.name(), module.status);
                     }
                 }
                 Err(e) => eprintln!("Error during name collection: {}", e),

@@ -34,9 +34,8 @@ pub enum ModuleStatus {
     LoadableModule,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct KmodModule {
-    pub name: String,
     pub status: ModuleStatus,
     // rel_path is relative to KmodContext.module_root
     pub rel_path: PathBuf,
@@ -75,6 +74,14 @@ fn extract_module_name(path_str: &str) -> String {
     base_name.replace('-', "_")
 }
 
+impl KmodModule {
+    pub fn name(&self) -> String {
+        // unwrap: UTF-8 already checked by BufReader.lines()
+        let p = &self.rel_path.as_os_str().to_str().unwrap();
+        extract_module_name(&p)
+    }
+}
+
 impl KmodContext {
     pub fn new(dirname: &Path) -> Result<Self, String> {
         let mut ctx = KmodContext {
@@ -82,11 +89,6 @@ impl KmodContext {
             alias_map: HashMap::new(),
             module_root: PathBuf::from(dirname),
         };
-
-        println!(
-            "Loading module database from: {}",
-            ctx.module_root.display()
-        );
 
         // load modules.dep
         ctx.load_hard_dependencies()
@@ -137,9 +139,8 @@ impl KmodContext {
             // TODO: we should never have an existing entry on first load!
             let module = self
                 .modules_hash
-                .entry(module_name.clone())
+                .entry(module_name)
                 .or_insert_with(|| KmodModule {
-                    name: module_name,
                     status: ModuleStatus::LoadableModule,
                     rel_path: PathBuf::from(module_path_str),
                     hard_deps: Vec::new(),
@@ -232,9 +233,8 @@ impl KmodContext {
             // update its status
             let module = self
                 .modules_hash
-                .entry(module_name.clone())
+                .entry(module_name)
                 .or_insert_with(|| KmodModule {
-                    name: module_name,
                     status: ModuleStatus::Builtin,
                     rel_path: PathBuf::new(),
                     hard_deps: Vec::new(),
@@ -425,7 +425,6 @@ mod tests {
         ctx.modules_hash.insert(
             "mod_a".to_string(),
             KmodModule {
-                name: "mod_a".to_string(),
                 status: ModuleStatus::LoadableModule,
                 rel_path: PathBuf::new(),
                 hard_deps: Vec::new(),
@@ -472,7 +471,6 @@ mod tests {
         ctx.modules_hash.insert(
             "mod_a".to_string(),
             KmodModule {
-                name: "mod_a".to_string(),
                 status: ModuleStatus::LoadableModule,
                 rel_path: PathBuf::new(),
                 hard_deps: Vec::new(),
@@ -484,7 +482,6 @@ mod tests {
         ctx.modules_hash.insert(
             "mod_b".to_string(),
             KmodModule {
-                name: "mod_b".to_string(),
                 status: ModuleStatus::LoadableModule,
                 rel_path: PathBuf::new(),
                 hard_deps: Vec::new(),
@@ -575,7 +572,6 @@ mod tests {
         ctx.modules_hash.insert(
             "mod_target".to_string(),
             KmodModule {
-                name: "mod_target".to_string(),
                 status: ModuleStatus::LoadableModule,
                 rel_path: PathBuf::new(),
                 hard_deps: Vec::new(),
@@ -615,7 +611,6 @@ mod tests {
 
         // setup KmodModule for find calls
         let target_module = KmodModule {
-            name: "mod_target".to_string(),
             status: ModuleStatus::LoadableModule,
             rel_path: PathBuf::from("kernel/target.ko"),
             hard_deps: vec!["dep1".to_string()],
@@ -624,13 +619,12 @@ mod tests {
             weak_deps: Vec::new(),
         };
         ctx.modules_hash
-            .insert(target_module.name.clone(), target_module.clone());
+            .insert("mod_target".to_string(), target_module.clone());
         ctx.alias_map
             .insert("alias_target".to_string(), "mod_target".to_string());
         ctx.modules_hash.insert(
             "builtin_mod".to_string(),
             KmodModule {
-                name: "builtin_mod".to_string(),
                 status: ModuleStatus::Builtin,
                 rel_path: PathBuf::new(),
                 hard_deps: Vec::new(),
@@ -651,7 +645,7 @@ mod tests {
         let found_alias = ctx
             .find("alias_target")
             .expect("Should find mod_target via alias");
-        assert_eq!(found_alias.name, "mod_target");
+        assert_eq!(found_alias, target_module);
 
         // Builtin Module
         let found_builtin = ctx.find("builtin_mod").expect("Should find builtin_mod");
@@ -776,13 +770,8 @@ mod tests {
             .find("alias_for_b")
             .expect("alias_for_b should resolve");
         assert_eq!(
-            aliased_mod.name, "mod_b",
-            "alias should resolve to the correct module name"
-        );
-        assert_eq!(
-            aliased_mod.status,
-            ModuleStatus::LoadableModule,
-            "alias status(LoadableModule) failed"
+            aliased_mod, mod_b,
+            "alias should resolve to the correct module"
         );
 
         // Check ModuleNotFound
@@ -860,7 +849,7 @@ mod tests {
 
         // The returned module should be the actual module, mod32c_intel
         assert_eq!(
-            aliased_mod.name, "mod32c_intel",
+            aliased_mod.name(), "mod32c_intel",
             "alias lookup should return the real module name"
         );
         assert_eq!(

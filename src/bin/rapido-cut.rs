@@ -381,6 +381,8 @@ fn main() -> io::Result<()> {
             off: 0,
             missing: vec!(),
         },
+        // TODO: kmods currently only tracks user-provided modules. Dependencies
+        // are omitted and @missing isn't filled.
         kmods: Gather {
             names: vec!(),
             off: 0,
@@ -610,7 +612,7 @@ fn main() -> io::Result<()> {
                 continue;
             },
             Some(m) if m.status == ModuleStatus::Builtin => {
-                dout!("{} builtin", m.name);
+                dout!("{} builtin", name);
                 continue;
             },
             Some(m) => m,
