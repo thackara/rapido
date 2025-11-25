@@ -46,6 +46,8 @@ struct Gather {
 
 const BIN_PATHS: [&str; 2] = [ "/usr/bin", "/usr/sbin" ];
 const LIB_PATHS: [&str; 2] = [ "/usr/lib64", "/usr/lib" ];
+// FIXME: we shouldn't assume rapido-init location
+const RAPIDO_INIT_PATH: &str = "target/release/rapido-init";
 
 // We *should* be running as an unprivileged process, so don't filter or block
 // access to parent or special paths; this should all be handled by the OS.
@@ -785,7 +787,7 @@ fn main() -> io::Result<()> {
 
     let mut state = State {
         bins: Gather {
-            names: vec!(),
+            names: vec!((RAPIDO_INIT_PATH.to_string(), Some("/init".to_string()))),
             off: 0,
             missing: vec!(),
         },
