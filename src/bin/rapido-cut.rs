@@ -589,6 +589,90 @@ fn gather_archive_kmods<W: Seek + Write>(
     Ok(())
 }
 
+fn gather_archive_data<W: Seek + Write>(
+    data: &mut Gather,
+    paths_seen: &mut HashSet<PathBuf>,
+    cpio_state: &mut cpio::ArchiveState,
+    mut cpio_writer: W,
+) -> io::Result<()> {
+
+    // walk each src entry and append any newly found dirs for later traversal
+    while let Some((src, dst)) = data.names.get(data.off) {
+        data.off += 1;
+
+        let src_p = PathBuf::from(src);
+        let src_md = fs::symlink_metadata(src)?;    // TODO catch missing
+        let src_amd = cpio::ArchiveMd::from(cpio_state, &src_md)?;
+        let dst_p = match dst {
+            None => panic!("data dst None"),
+            Some(d) => PathBuf::from(d),
+        };
+        if !dst_p.is_absolute() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "data dst paths must be absolute",
+            ));
+        }
+
+        // TODO create parent dirs, ideally skipping step for read_dir children
+
+        if !paths_seen.insert(dst_p.clone()) {
+            dout!("ignoring seen data path: {:?}", &dst_p);
+            continue;
+        }
+
+        match src_amd.mode & cpio::S_IFMT {
+            // add any subdirs to gather list
+            cpio::S_IFDIR => {
+                cpio::archive_path(cpio_state, &dst_p, &src_amd, &mut cpio_writer)?;
+
+                let mut entries = fs::read_dir(&src_p)?
+                    .map(|res| res.map(|e| e.path()))
+                    .collect::<Result<Vec<_>, io::Error>>()?;
+                // sort for reproducibility
+                entries.sort();
+
+                for entry in entries {
+                    // "." and ".." are filtered by fs::read_dir()
+                    let cs = match src_p.join(&entry).to_str() {
+                        None => return Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "non utf-8 path encountered in read_dir"
+                        )),
+                        Some(cs) => cs.to_string(),
+                    };
+                    let cd = match dst_p.join(&entry).to_str() {
+                        None => panic!("non utf-8 path encountered in read_dir"),
+                        Some(cd) => cd.to_string(),
+                    };
+                    data.names.push((cs, Some(cd)));
+                }
+            },
+            // dataless files can use archive_path
+            cpio::S_IFREG if src_amd.len > 0 => {
+                let f = fs::OpenOptions::new().read(true).open(&src_p)?;
+                cpio::archive_file(cpio_state, &dst_p, &src_amd, &f, &mut cpio_writer)?;
+            },
+            cpio::S_IFLNK => {
+                let tgt = fs::read_link(&src_p)?;
+                if Path::new(&tgt).is_absolute() {
+                    // don't allow abs symlinks in data if we can avoid them
+                    eprintln!("{:?}: ignoring absolute symlink in data", src_p);
+                    continue;
+                }
+                cpio::archive_symlink(cpio_state, &dst_p, &src_amd, &tgt, &mut cpio_writer)?;
+            },
+            _ => {
+                cpio::archive_path(cpio_state, &dst_p, &src_amd, &mut cpio_writer)?;
+            },
+        };
+
+        println!("archived data: {:?}→{:?}", src_p, dst_p);
+    }
+
+    Ok(())
+}
+
 fn args_usage(params: &[Argument]) {
     argument::print_help("rapido-cut", "OUTPUT", params);
 }
@@ -596,6 +680,7 @@ fn args_usage(params: &[Argument]) {
 fn args_process(
     inst: &mut Vec<(String, Option<String>)>,
     kmods_out: &mut Vec<(String, Option<String>)>,
+    data: &mut Vec<(String, Option<String>)>,
 ) -> argument::Result<PathBuf> {
     let params = &[
         Argument::positional("OUTPUT", "Write initramfs archive to this file path."),
@@ -608,6 +693,11 @@ fn args_process(
             "install-kmod",
             "MODULES",
             "space separated list of kernel modules to install with dependencies.",
+        ),
+        Argument::value(
+            "include",
+            "SRC_PATH DEST_PATH",
+            "space separated list of path pairs to install recursively.",
         ),
         Argument::short_flag('h', "help", "Print help message."),
     ];
@@ -647,6 +737,19 @@ fn args_process(
                     .collect();
                 kmods_out.append(&mut kmod_parsed?);
             }
+            "include" => {
+                let mut iter = value.unwrap().split(' ');
+                while let Some(src) = iter.next() {
+                    let dst = match iter.next() {
+                        None => return Err(argument::Error::InvalidValue {
+                            value: src.to_string(),
+                            expected: String::from("SRC DEST pairs"),
+                        }),
+                        Some(d) => d,
+                    };
+                    data.push((src.to_string(), Some(dst.to_string())));
+                }
+            }
             "help" => return Err(argument::Error::PrintHelp),
             _ => unreachable!(),
         };
@@ -677,7 +780,7 @@ fn main() -> io::Result<()> {
         bins: Gather,
         libs: Gather,
         kmods: Gather,
-        // TODO: data: Gather,  // don't check for elf deps? or just rename "bins" to "files" and
+        data: Gather,
     }
 
     let mut state = State {
@@ -694,6 +797,11 @@ fn main() -> io::Result<()> {
         // TODO: kmods currently only tracks user-provided modules. Dependencies
         // are omitted and @missing isn't filled.
         kmods: Gather {
+            names: vec!(),
+            off: 0,
+            missing: vec!(),
+        },
+        data: Gather {
             names: vec!(),
             off: 0,
             missing: vec!(),
@@ -725,7 +833,11 @@ fn main() -> io::Result<()> {
         Err(_) => HashMap::new(),
     };
 
-    let cpio_out_path = match args_process(&mut state.bins.names, &mut state.kmods.names) {
+    let cpio_out_path = match args_process(
+        &mut state.bins.names,
+        &mut state.kmods.names,
+        &mut state.data.names
+    ) {
         Ok(p) => p,
         Err(argument::Error::PrintHelp) => return Ok(()),
         Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidInput, e.to_string())),
@@ -752,7 +864,15 @@ fn main() -> io::Result<()> {
     // avoid archiving already-archived paths
     let mut paths_seen: HashSet<PathBuf> = HashSet::new();
 
-    // process bins first, as they may add to libs *and* bins
+    // optimization: rapido-rsc paths are parsed by rapido-vm so put them first
+    gather_archive_data(
+        &mut state.data,
+        &mut paths_seen,
+        &mut cpio_state,
+        &mut cpio_writer
+    )?;
+
+    // process bins before libs, as they may add to libs *and* bins
     gather_archive_bins(
         &mut state.bins,
         &mut state.libs,
@@ -762,7 +882,6 @@ fn main() -> io::Result<()> {
         &mut cpio_writer
     )?;
 
-    // process libs next, which may add to libs
     gather_archive_libs(
         &mut state.libs,
         &mut libs_seen,
