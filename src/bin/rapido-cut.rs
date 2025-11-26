@@ -205,6 +205,7 @@ fn gather_archive_dirs<W: Seek + Write>(
         match comp {
             Component::RootDir => continue,
             Component::CurDir | Component::ParentDir => {
+                // FIXME: absolute() does leave ParentDir components!
                 panic!("got CurDir or ParentDir after canonicalization");
             },
             Component::Prefix(_) => {
@@ -266,11 +267,11 @@ fn gather_archive_bins<W: Seek + Write>(
 ) -> io::Result<()> {
 
     while let Some((bin_src, bin_dst)) = bins.names.get(bins.off) {
+        bins.off += 1;
         let got = match path_stat(&bin_src, &BIN_PATHS) {
             Some(fse) => fse,
             None => {
                 bins.missing.push(bins.off);
-                bins.off += 1;
                 continue;
             }
         };
@@ -301,20 +302,36 @@ fn gather_archive_bins<W: Seek + Write>(
         )?;
         match amd.mode & cpio::S_IFMT {
             cpio::S_IFLNK => {
+                // symlinks are tricky, so provide some restrictions:
+                // - the host path must match the initramfs dest path
+                // - targets be resolvable; no dangling / arbitrary links
+                // - multiple indirect links will be collapsed
                 if bin_dst.is_some() {
                     eprintln!("symlink source and cpio dest paths must match");
                     return Err(io::Error::from(io::ErrorKind::InvalidInput));
                 }
-                let symlink_tgt = fs::read_link(&got.path)?;
-                cpio::archive_symlink(cpio_state, &got.path, &amd, &symlink_tgt, &mut cpio_writer)?;
-                if let Ok(t) = symlink_tgt.into_os_string().into_string() {
-                    // FIXME this could loop endlessly; filter dups
+                let canon_tgt = match got.path.canonicalize() {
+                    Err(e) => {
+                        eprintln!("{:?} canonicalize failed: {:?}", got.path, e);
+                        continue;
+                    },
+                    Ok(t) => t,
+                };
+                cpio::archive_symlink(
+                    cpio_state,
+                    &got.path,
+                    &amd,
+                    &canon_tgt,
+                    &mut cpio_writer
+                )?;
+                println!("archived symlink: {:?} ({:?})", got.path, canon_tgt);
+
+                if let Ok(t) = canon_tgt.into_os_string().into_string() {
                     bins.names.push((t, None));
                 } else {
-                    eprintln!("bogus symlink target {:?}", &got.path);
+                    eprintln!("non utf-8 symlink target {:?}", &got.path);
                     return Err(io::Error::from(io::ErrorKind::InvalidInput));
                 }
-                println!("archived symlink: {:?}", got.path);
             },
             cpio::S_IFREG => {
                 gather_archive_file(
@@ -334,7 +351,6 @@ fn gather_archive_bins<W: Seek + Write>(
                 println!("archived other: {:?}→{:?}", got.path, dst);
             },
         };
-        bins.off += 1;
     }
 
     Ok(())
@@ -350,11 +366,11 @@ fn gather_archive_libs<W: Seek + Write>(
 ) -> io::Result<()> {
 
     while let Some((lib_src, lib_dst)) = libs.names.get(libs.off) {
+        libs.off += 1;
         let got = match path_stat(&lib_src, &LIB_PATHS) {
             Some(fse) => fse,
             None => {
                 libs.missing.push(libs.off);
-                libs.off += 1;
                 continue;
             }
         };
@@ -388,16 +404,28 @@ fn gather_archive_libs<W: Seek + Write>(
                     eprintln!("symlink source and cpio dest paths must match");
                     return Err(io::Error::from(io::ErrorKind::InvalidInput));
                 }
-                let symlink_tgt = fs::read_link(&got.path)?;
-                cpio::archive_symlink(cpio_state, &got.path, &amd, &symlink_tgt, &mut cpio_writer)?;
-                if let Ok(t) = symlink_tgt.into_os_string().into_string() {
-                    // FIXME this could loop endlessly; filter dups
+                let canon_tgt = match got.path.canonicalize() {
+                    Err(e) => {
+                        eprintln!("{:?} canonicalize failed: {:?}", got.path, e);
+                        continue;
+                    },
+                    Ok(t) => t,
+                };
+                cpio::archive_symlink(
+                    cpio_state,
+                    &got.path,
+                    &amd,
+                    &canon_tgt,
+                    &mut cpio_writer
+                )?;
+                println!("archived lib symlink: {:?} ({:?})", got.path, canon_tgt);
+
+                if let Ok(t) = canon_tgt.into_os_string().into_string() {
                     libs.names.push((t, None));
                 } else {
-                    eprintln!("bogus symlink target {:?}", &got.path);
+                    eprintln!("non utf-8 symlink target {:?}", &got.path);
                     return Err(io::Error::from(io::ErrorKind::InvalidInput));
                 }
-                println!("archived lib symlink: {:?}", got.path);
             },
             cpio::S_IFREG => {
                 gather_archive_file(
@@ -421,7 +449,6 @@ fn gather_archive_libs<W: Seek + Write>(
                 libs.missing.push(libs.off);
             },
         };
-        libs.off += 1;
     }
 
     Ok(())
