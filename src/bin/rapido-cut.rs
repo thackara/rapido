@@ -21,6 +21,8 @@ const BIN_PATHS: [&str; 2] = [ "/usr/bin", "/usr/sbin" ];
 const LIB_PATHS: [&str; 2] = [ "/usr/lib64", "/usr/lib" ];
 // FIXME: we shouldn't assume rapido-init location
 const RAPIDO_INIT_PATH: &str = "target/release/rapido-init";
+// FIXME: don't assume rapido.conf location, support env var
+const RAPIDO_CONF_PATH: &str = "rapido.conf";
 
 const GATHER_ITEM_MISSING: u32 =        1<<0;
 const GATHER_ITEM_IGNORE_PARENT: u32 =  1<<1;
@@ -858,27 +860,22 @@ fn main() -> io::Result<()> {
             missing: vec!(),
         },
         data: GatherData {
-            items: vec!(),
+            items: vec!(GatherItem {
+                src: PathBuf::from(RAPIDO_CONF_PATH),
+                dst: PathBuf::from("/rapido.conf"),
+                flags: GATHER_ITEM_IGNORE_PARENT,
+            }),
             off: 0,
         },
     };
 
-    // read: kv-conf with rapido_conf
-    // FIXME: prepare RapidoConf parser(based on kv-conf)
-    // kmod-parser:
-    //      kmod_dir: for src_path, derived from KERNEL_INSTALL_MOD_PATH,
-    //                  or default to /lib/modules/kver
-    //      kver: for dst_path inside initrd
-
-    let rapido_conf_path = "rapido.conf"; // FIXME: assuming cwd, use env::RAPIDO_CONF or RapidoConf parser
-
-    let conf = match fs::File::open(rapido_conf_path) {
+    let conf = match fs::File::open(RAPIDO_CONF_PATH) {
         Ok(f) => {
             let mut reader = io::BufReader::new(f);
             match kv_conf::kv_conf_process(&mut reader) {
                 Ok(c) => c,
                 Err(e) => {
-                    println!("failed to process {}: {:?}", rapido_conf_path, e);
+                    eprintln!("failed to process {}: {:?}", RAPIDO_CONF_PATH, e);
                     return Err(e);
                 }
             }
