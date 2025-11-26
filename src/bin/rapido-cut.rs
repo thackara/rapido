@@ -17,6 +17,14 @@ mod kmod;
 use kmod::kmod_context::{KmodContext, ModuleStatus, MODULE_DB_FILES};
 extern crate kv_conf;
 
+const BIN_PATHS: [&str; 2] = [ "/usr/bin", "/usr/sbin" ];
+const LIB_PATHS: [&str; 2] = [ "/usr/lib64", "/usr/lib" ];
+// FIXME: we shouldn't assume rapido-init location
+const RAPIDO_INIT_PATH: &str = "target/release/rapido-init";
+
+const GATHER_ITEM_MISSING: u32 =        1<<0;
+const GATHER_ITEM_IGNORE_PARENT: u32 =  1<<1;
+
 // Don't print debug messages on release builds...
 #[cfg(debug_assertions)]
 macro_rules! dout {
@@ -32,6 +40,18 @@ struct Fsent {
     md: fs::Metadata,
 }
 
+struct GatherItem {
+    src: PathBuf,
+    dst: PathBuf,
+    flags: u32,
+}
+
+struct GatherData {
+    items: Vec<GatherItem>,
+    // offset that we are currently processing
+    off: usize,
+}
+
 struct Gather {
     // The names tuple is (host-source-path, Option<initramfs-destination).
     // If Option is None then the destination path will match the source.
@@ -43,11 +63,6 @@ struct Gather {
     // @names offset which couldn't be found
     missing: Vec<usize>,
 }
-
-const BIN_PATHS: [&str; 2] = [ "/usr/bin", "/usr/sbin" ];
-const LIB_PATHS: [&str; 2] = [ "/usr/lib64", "/usr/lib" ];
-// FIXME: we shouldn't assume rapido-init location
-const RAPIDO_INIT_PATH: &str = "target/release/rapido-init";
 
 // We *should* be running as an unprivileged process, so don't filter or block
 // access to parent or special paths; this should all be handled by the OS.
@@ -592,84 +607,108 @@ fn gather_archive_kmods<W: Seek + Write>(
 }
 
 fn gather_archive_data<W: Seek + Write>(
-    data: &mut Gather,
+    data: &mut GatherData,
     paths_seen: &mut HashSet<PathBuf>,
     cpio_state: &mut cpio::ArchiveState,
     mut cpio_writer: W,
 ) -> io::Result<()> {
 
     // walk each src entry and append any newly found dirs for later traversal
-    while let Some((src, dst)) = data.names.get(data.off) {
+    while let Some(item) = data.items.get(data.off) {
         data.off += 1;
 
-        let src_p = PathBuf::from(src);
-        let src_md = fs::symlink_metadata(src)?;    // TODO catch missing
+        let src_md = fs::symlink_metadata(&item.src)?;    // TODO catch missing
         let src_amd = cpio::ArchiveMd::from(cpio_state, &src_md)?;
-        let dst_p = match dst {
-            None => panic!("data dst None"),
-            Some(d) => PathBuf::from(d),
-        };
-        if !dst_p.is_absolute() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "data dst paths must be absolute",
-            ));
-        }
 
-        // TODO create parent dirs, ideally skipping step for read_dir children
-
-        if !paths_seen.insert(dst_p.clone()) {
-            dout!("ignoring seen data path: {:?}", &dst_p);
+        if !paths_seen.insert(item.dst.clone()) {
+            dout!("ignoring seen data path: {:?}", &item.dst);
             continue;
+        }
+        if item.flags & GATHER_ITEM_IGNORE_PARENT == 0 {
+            let parent_dirs_amd = cpio::ArchiveMd{
+                mode: match src_amd.mode & cpio::S_IFMT {
+                    cpio::S_IFDIR => src_amd.mode,
+                    _ => (src_amd.mode & !cpio::S_IFMT) | cpio::S_IFDIR | 0111,
+                },
+                nlink: 2,
+                rmajor: 0,
+                rminor: 0,
+                len: 0,
+                ..src_amd
+            };
+            gather_archive_dirs(
+                item.dst.parent(),
+                &parent_dirs_amd,
+                paths_seen,
+                cpio_state,
+                &mut cpio_writer
+            )?;
         }
 
         match src_amd.mode & cpio::S_IFMT {
             // add any subdirs to gather list
             cpio::S_IFDIR => {
-                cpio::archive_path(cpio_state, &dst_p, &src_amd, &mut cpio_writer)?;
+                cpio::archive_path(
+                    cpio_state,
+                    &item.dst,
+                    &src_amd,
+                    &mut cpio_writer
+                )?;
+                println!("archived data dir: {:?}→{:?}", item.src, item.dst);
 
-                let mut entries = fs::read_dir(&src_p)?
+                let mut entries = fs::read_dir(&item.src)?
                     .map(|res| res.map(|e| e.path()))
                     .collect::<Result<Vec<_>, io::Error>>()?;
                 // sort for reproducibility
                 entries.sort();
 
+                let cs = item.src.clone();
+                let cd = item.dst.clone();
                 for entry in entries {
                     // "." and ".." are filtered by fs::read_dir()
-                    let cs = match src_p.join(&entry).to_str() {
-                        None => return Err(io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            "non utf-8 path encountered in read_dir"
-                        )),
-                        Some(cs) => cs.to_string(),
-                    };
-                    let cd = match dst_p.join(&entry).to_str() {
-                        None => panic!("non utf-8 path encountered in read_dir"),
-                        Some(cd) => cd.to_string(),
-                    };
-                    data.names.push((cs, Some(cd)));
+                    data.items.push(GatherItem {
+                        src: cs.join(&entry),
+                        dst: cd.join(&entry),
+                        // we don't need to check for parent dir existence, as
+                        // we just archived it.
+                        flags: GATHER_ITEM_IGNORE_PARENT,
+                    });
                 }
             },
             // dataless files can use archive_path
             cpio::S_IFREG if src_amd.len > 0 => {
-                let f = fs::OpenOptions::new().read(true).open(&src_p)?;
-                cpio::archive_file(cpio_state, &dst_p, &src_amd, &f, &mut cpio_writer)?;
+                let f = fs::OpenOptions::new().read(true).open(&item.src)?;
+                cpio::archive_file(
+                    cpio_state,
+                    &item.dst,
+                    &src_amd,
+                    &f,
+                    &mut cpio_writer
+                )?;
+                println!("archived data file: {:?}→{:?}", item.src, item.dst);
             },
             cpio::S_IFLNK => {
-                let tgt = fs::read_link(&src_p)?;
-                if Path::new(&tgt).is_absolute() {
-                    // don't allow abs symlinks in data if we can avoid them
-                    eprintln!("{:?}: ignoring absolute symlink in data", src_p);
-                    continue;
-                }
-                cpio::archive_symlink(cpio_state, &dst_p, &src_amd, &tgt, &mut cpio_writer)?;
+                let tgt = fs::read_link(&item.src)?;
+                // XXX don't follow data symlinks to archive their targets
+                cpio::archive_symlink(
+                    cpio_state,
+                    &item.dst,
+                    &src_amd,
+                    &tgt,
+                    &mut cpio_writer
+                )?;
+                println!("archived data symlink: {:?}→{:?}", item.src, item.dst);
             },
             _ => {
-                cpio::archive_path(cpio_state, &dst_p, &src_amd, &mut cpio_writer)?;
+                cpio::archive_path(
+                    cpio_state,
+                    &item.dst,
+                    &src_amd,
+                    &mut cpio_writer
+                )?;
+                println!("archived data path: {:?}→{:?}", item.src, item.dst);
             },
         };
-
-        println!("archived data: {:?}→{:?}", src_p, dst_p);
     }
 
     Ok(())
@@ -682,7 +721,7 @@ fn args_usage(params: &[Argument]) {
 fn args_process(
     inst: &mut Vec<(String, Option<String>)>,
     kmods_out: &mut Vec<(String, Option<String>)>,
-    data: &mut Vec<(String, Option<String>)>,
+    data: &mut Vec<GatherItem>,
 ) -> argument::Result<PathBuf> {
     let params = &[
         Argument::positional("OUTPUT", "Write initramfs archive to this file path."),
@@ -747,9 +786,24 @@ fn args_process(
                             value: src.to_string(),
                             expected: String::from("SRC DEST pairs"),
                         }),
-                        Some(d) => d,
+                        Some(d) => {
+                            let dst = PathBuf::from(d);
+                            if !dst.is_absolute() {
+                                return Err(argument::Error::InvalidValue {
+                                    value: d.to_string(),
+                                    expected: String::from(
+                                        "DEST paths must be absolute"
+                                    ),
+                                });
+                            }
+                            dst
+                        },
                     };
-                    data.push((src.to_string(), Some(dst.to_string())));
+                    data.push(GatherItem {
+                        src: PathBuf::from(src),
+                        dst,
+                        flags: 0,
+                    });
                 }
             }
             "help" => return Err(argument::Error::PrintHelp),
@@ -782,7 +836,7 @@ fn main() -> io::Result<()> {
         bins: Gather,
         libs: Gather,
         kmods: Gather,
-        data: Gather,
+        data: GatherData,
     }
 
     let mut state = State {
@@ -803,10 +857,9 @@ fn main() -> io::Result<()> {
             off: 0,
             missing: vec!(),
         },
-        data: Gather {
-            names: vec!(),
+        data: GatherData {
+            items: vec!(),
             off: 0,
-            missing: vec!(),
         },
     };
 
@@ -838,7 +891,7 @@ fn main() -> io::Result<()> {
     let cpio_out_path = match args_process(
         &mut state.bins.names,
         &mut state.kmods.names,
-        &mut state.data.names
+        &mut state.data.items
     ) {
         Ok(p) => p,
         Err(argument::Error::PrintHelp) => return Ok(()),
