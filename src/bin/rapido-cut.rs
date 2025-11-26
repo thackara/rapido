@@ -175,9 +175,11 @@ fn elf_deps(
 
 // XXX: symlinks in parent ancestry will be archived as dirs
 // FIXME: how does this handle relative "" parents?
+// @child_amd provides the child metadata, which is used to mock up metadata
+// for parent directories.
 fn gather_archive_dirs<W: Seek + Write>(
     path: Option<&Path>,
-    parent_dirs_amd: &cpio::ArchiveMd,
+    child_amd: &cpio::ArchiveMd,
     paths_seen: &mut HashSet<PathBuf>,
     cpio_state: &mut cpio::ArchiveState,
     mut cpio_writer: W,
@@ -198,9 +200,22 @@ fn gather_archive_dirs<W: Seek + Write>(
         dout!("ignoring seen directory and parents: {:?}", p);
         return Ok(());
     }
-    let mut here = PathBuf::from("/");
+
+    // mock up md to use for any parent directories. 0111: allow traversal
+    let parent_dirs_amd = cpio::ArchiveMd{
+        mode: match child_amd.mode & cpio::S_IFMT {
+            cpio::S_IFDIR => child_amd.mode,
+            _ => (child_amd.mode & !cpio::S_IFMT) | cpio::S_IFDIR | 0111,
+        },
+        nlink: 2,
+        rmajor: 0,
+        rminor: 0,
+        len: 0,
+        ..*child_amd
+    };
 
     // order is important: parent dirs must be archived before children
+    let mut here = PathBuf::from("/");
     for comp in p.components() {
         match comp {
             Component::RootDir => continue,
@@ -276,18 +291,6 @@ fn gather_archive_bins<W: Seek + Write>(
             }
         };
         let amd = cpio::ArchiveMd::from(&cpio_state, &got.md)?;
-        // mock up md to use for any parent directories. 0111: allow traversal
-        let parent_dirs_amd = cpio::ArchiveMd{
-            mode: match amd.mode & cpio::S_IFMT {
-                cpio::S_IFDIR => amd.mode,
-                _ => (amd.mode & !cpio::S_IFMT) | cpio::S_IFDIR | 0111,
-            },
-            nlink: 2,
-            rmajor: 0,
-            rminor: 0,
-            len: 0,
-            ..amd
-        };
         let dst = match bin_dst {
             None => &got.path,
             Some(d) => &path::absolute(d)?,
@@ -295,7 +298,7 @@ fn gather_archive_bins<W: Seek + Write>(
 
         gather_archive_dirs(
             dst.parent(),
-            &parent_dirs_amd,
+            &amd,
             paths_seen,
             cpio_state,
             &mut cpio_writer
@@ -375,25 +378,13 @@ fn gather_archive_libs<W: Seek + Write>(
             }
         };
         let amd = cpio::ArchiveMd::from(&cpio_state, &got.md)?;
-        // mock up md to use for any parent directories. 0111: allow traversal
-        let parent_dirs_amd = cpio::ArchiveMd{
-            mode: match amd.mode & cpio::S_IFMT {
-                cpio::S_IFDIR => amd.mode,
-                _ => (amd.mode & !cpio::S_IFMT) | cpio::S_IFDIR | 0o111,
-            },
-            nlink: 2,
-            rmajor: 0,
-            rminor: 0,
-            len: 0,
-            ..amd
-        };
         let dst = match lib_dst {
             None => &got.path,
             Some(d) => &path::absolute(d)?,
         };
         gather_archive_dirs(
             dst.parent(),
-            &parent_dirs_amd,
+            &amd,
             paths_seen,
             cpio_state,
             &mut cpio_writer
@@ -463,22 +454,9 @@ fn archive_kmod_path<W: Seek + Write>(
 ) -> io::Result<()> {
     let md = fs::symlink_metadata(src)?;
     let amd = cpio::ArchiveMd::from(cpio_state, &md)?;
-    // mock up md to use for any parent directories. 0111: allow traversal
-    let parent_dirs_amd = cpio::ArchiveMd{
-        mode: match amd.mode & cpio::S_IFMT {
-            cpio::S_IFDIR => amd.mode,
-            _ => (amd.mode & !cpio::S_IFMT) | cpio::S_IFDIR | 0o111,
-        },
-        nlink: 2,
-        rmajor: 0,
-        rminor: 0,
-        len: 0,
-        ..amd
-    };
-
     gather_archive_dirs(
         dst.parent(),
-        &parent_dirs_amd,
+        &amd,
         paths_seen,
         cpio_state,
         &mut cpio_writer
@@ -654,20 +632,9 @@ fn gather_archive_data<W: Seek + Write>(
             continue;
         }
         if item.flags & GATHER_ITEM_IGNORE_PARENT == 0 {
-            let parent_dirs_amd = cpio::ArchiveMd{
-                mode: match src_amd.mode & cpio::S_IFMT {
-                    cpio::S_IFDIR => src_amd.mode,
-                    _ => (src_amd.mode & !cpio::S_IFMT) | cpio::S_IFDIR | 0111,
-                },
-                nlink: 2,
-                rmajor: 0,
-                rminor: 0,
-                len: 0,
-                ..src_amd
-            };
             gather_archive_dirs(
                 item.dst.parent(),
-                &parent_dirs_amd,
+                &src_amd,
                 paths_seen,
                 cpio_state,
                 &mut cpio_writer
