@@ -474,6 +474,35 @@ fn archive_kmod_path<W: Seek + Write>(
     Ok(())
 }
 
+// XXX: Tumbleweed kmod is patched to use "/usr/lib/modules", while
+// mainline kernel and Leap 15 use "/lib/modules". Worse still, there's no
+// easy way to specify the directory for modprobe, so we use symlinks. Booo.
+// See https://src.opensuse.org/pool/kmod/src/branch/factory/README.usrmerge
+fn archive_kmods_symlink<W: Seek + Write>(
+    paths_seen: &mut HashSet<PathBuf>,
+    cpio_state: &mut cpio::ArchiveState,
+    mut cpio_writer: W,
+) -> io::Result<()> {
+    let libp = Path::new("/lib");
+    let (p, tgt) = match paths_seen.contains(libp) {
+        false => (libp, Path::new("/usr/lib")),
+        true => (Path::new("/lib/modules"), Path::new("/usr/lib/modules")),
+    };
+    let amd = cpio::ArchiveMd{
+        nlink: 1,
+        mode: cpio::S_IFLNK | 0o777,
+        uid: 0,
+        gid: 0,
+        mtime: 0,
+        rmajor: 0,
+        rminor: 0,
+        len: 0,
+    };
+    cpio::archive_symlink(cpio_state, &p, &amd, &tgt, &mut cpio_writer)?;
+    println!("archived kmod symlink {:?} ({:?})", p, tgt);
+    Ok(())
+}
+
 fn gather_archive_kmods<W: Seek + Write>(
     conf: &HashMap<String, String>,
     kmods: &Gather,
@@ -482,12 +511,18 @@ fn gather_archive_kmods<W: Seek + Write>(
     mut cpio_writer: W,
 ) -> io::Result<()> {
     let krel = rapido::conf_src_or_host_kernel_vers(&conf)?;
-    let kmod_dst_root = PathBuf::from("/lib/modules/").join(&krel);
+    let kmod_dst_root = PathBuf::from("/usr/lib/modules/").join(&krel);
     let kmod_src_root = match conf.get("KERNEL_INSTALL_MOD_PATH") {
         // should assert that KERNEL_SRC is set?
         Some(kmp) => PathBuf::from(kmp).join(format!("lib/modules/{krel}")),
-        None => kmod_dst_root.clone(),
+        None if kmod_dst_root.exists() => kmod_dst_root.clone(),
+        None => {
+            // assume that we have a non-Tumbleweed system
+            PathBuf::from("/lib/modules/").join(&krel)
+        },
     };
+
+    archive_kmods_symlink(paths_seen, cpio_state, &mut cpio_writer)?;
 
     let context = match KmodContext::new(&kmod_src_root) {
         Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidInput, e)),
