@@ -43,6 +43,25 @@ pub fn conf_src_or_host_kernel_vers(
     }
 }
 
+pub fn vm_kmod_deps(conf: &HashMap<String, String>, has_net: bool) -> Vec<&str> {
+    let mut deps = vec!();
+
+    match conf.get("QEMU_EXTRA_ARGS") {
+        Some(v) if v.contains("virtio-rng-pci") => deps.push("virtio_rng"),
+        Some(_) | None => {},
+    };
+
+    if conf.get("VIRTFS_SHARE_PATH").is_some() {
+        deps.extend(&["9pnet", "9pnet_virtio", "9p"]);
+    }
+
+    if has_net {
+	deps.extend(&["virtio_net", "af_packet"]);
+    }
+
+    deps
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
