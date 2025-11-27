@@ -154,35 +154,24 @@ fn kcli_parse(kcmdline: &[u8]) -> io::Result<KcliArgs> {
 }
 
 fn kmods_load(conf: &HashMap<String, String>, has_net: bool) -> io::Result<()> {
-    let mut modprobe_args: Vec<&str> = vec!("-a");
+    let kmods = rapido::vm_kmod_deps(conf, has_net);
 
-    match conf.get("QEMU_EXTRA_ARGS") {
-        Some(v) => {
-            if v.contains("virtio-rng-pci") {
-                modprobe_args.push("virtio-rng");
-            }
-        },
-        None => {},
-    };
-
-    if conf.get("VIRTFS_SHARE_PATH").is_some() {
-        modprobe_args.extend(&["9pnet", "9pnet_virtio", "9p"]);
-    }
-
-    if has_net {
-	modprobe_args.extend(&["virtio_net", "af_packet"]);
-    }
-
-    if modprobe_args.len() > 1 {
-        let status = Command::new("modprobe")
+    if kmods.len() > 0 {
+        match Command::new("modprobe")
             .env("PATH", "/usr/sbin:/usr/bin")
-            .args(&modprobe_args)
-            .status()
-            .expect("failed to execute modprobe process");
-        if !status.success() {
-            println!("modprobe failed");
-            return Err(io::Error::from(io::ErrorKind::BrokenPipe));
-        }
+            .arg("-a")
+            .args(&kmods)
+            .status() {
+            Err(e) => {
+                eprintln!("modprobe error: {:?}", e);
+                return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+            },
+            Ok(status) if !status.success() => {
+                println!("modprobe failed: {:?}", status);
+                return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+            },
+            Ok(_) => {},
+        };
     }
 
     Ok(())
