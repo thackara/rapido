@@ -503,9 +503,109 @@ fn archive_kmods_symlink<W: Seek + Write>(
     Ok(())
 }
 
+fn gather_archive_kmod_and_deps<W: Seek + Write>(
+    name: &str,
+    kmod_src_root: &Path,
+    kmod_dst_root: &Path,
+    context: &KmodContext,
+    paths_seen: &mut HashSet<PathBuf>,
+    cpio_state: &mut cpio::ArchiveState,
+    mut cpio_writer: W,
+) -> io::Result<()> {
+    let root_mod = match context.find(name) {
+        None => return Err(io::Error::from(io::ErrorKind::NotFound)),
+        Some(m) if m.status == ModuleStatus::Builtin => {
+            dout!("{} builtin", name);
+            return Ok(());
+        },
+        Some(m) => m,
+    };
+
+    // Fail if root mod or hard deps are missing.
+    // No recursive checking here; modules.dep entry is complete
+    // and doesn't contain Builtins.
+    let kmod_dst = kmod_dst_root.join(&root_mod.rel_path);
+    if paths_seen.insert(kmod_dst.clone()) {
+        let kmod_src = kmod_src_root.join(root_mod.rel_path);
+        archive_kmod_path(
+            &kmod_src,
+            &kmod_dst,
+            paths_seen,
+            cpio_state,
+            &mut cpio_writer
+        )?;
+    } else {
+        dout!("skipping duplicate kmod {:?} and all deps", &kmod_dst);
+        return Ok(());
+    }
+
+    for dep_mod in root_mod.hard_deps.iter() {
+        // XXX would be faster to use modules.dep path entries directly
+        let m = match context.find(dep_mod) {
+            None => return Err(
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("failed to resolve path for {dep_mod}")
+                        )
+                    ),
+            Some(m) => m,
+        };
+
+        let kmod_dst = kmod_dst_root.join(&m.rel_path);
+        if paths_seen.insert(kmod_dst.clone()) {
+            let kmod_src = kmod_src_root.join(m.rel_path);
+            archive_kmod_path(
+                &kmod_src,
+                &kmod_dst,
+                paths_seen,
+                cpio_state,
+                &mut cpio_writer
+            )?;
+        } else {
+            dout!("skipping duplicate kmod {:?}", &kmod_dst);
+        }
+    }
+
+    // Attempt to pull in soft and weak dependencies for root_mod.
+    // Not sure if we should be checking root_mod dependents.
+    for soft_mod in root_mod.soft_deps_pre.iter()
+        .chain(root_mod.soft_deps_post.iter())
+        .chain(root_mod.weak_deps.iter()) {
+        let m = match context.find(soft_mod) {
+            None => {
+                dout!("{:?} soft / weak kernel dep not found", soft_mod);
+                continue;
+            },
+            Some(m) if m.status == ModuleStatus::Builtin => continue,
+            Some(m) => m,
+        };
+        let kmod_dst = kmod_dst_root.join(&m.rel_path);
+        if paths_seen.insert(kmod_dst.clone()) {
+            let kmod_src = kmod_src_root.join(m.rel_path);
+            match archive_kmod_path(
+                &kmod_src,
+                &kmod_dst,
+                paths_seen,
+                cpio_state,
+                &mut cpio_writer
+            ) {
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                    dout!("{:?} soft / weak kernel dep missing", &kmod_src);
+                    continue;
+                },
+                Err(e) => return Err(e),
+                Ok(_) => {},
+            }
+        } else {
+            dout!("skipping duplicate kmod {:?}", &kmod_dst);
+        }
+    }
+    Ok(())
+}
+
 fn gather_archive_kmods<W: Seek + Write>(
     conf: &HashMap<String, String>,
-    kmods: &Gather,
+    kmods: &Vec<String>,
     paths_seen: &mut HashSet<PathBuf>,
     cpio_state: &mut cpio::ArchiveState,
     mut cpio_writer: W,
@@ -524,104 +624,28 @@ fn gather_archive_kmods<W: Seek + Write>(
 
     archive_kmods_symlink(paths_seen, cpio_state, &mut cpio_writer)?;
 
-    let context = match KmodContext::new(&kmod_src_root) {
+    let kmod_ctx = match KmodContext::new(&kmod_src_root) {
         Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidInput, e)),
         Ok(ctx) => ctx,
     };
 
-    for (name, _) in kmods.names.iter() {
-        let root_mod = match context.find(name) {
-            None => {
-                dout!("{} Module Not Found", name);
+    for name in kmods.iter() {
+        match gather_archive_kmod_and_deps(
+            &name,
+            &kmod_src_root,
+            &kmod_dst_root,
+            &kmod_ctx,
+            paths_seen,
+            cpio_state,
+            &mut cpio_writer
+        ) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                eprintln!("failed to find {name}");
                 // TODO: flag missing modules
-                continue;
             },
-            Some(m) if m.status == ModuleStatus::Builtin => {
-                dout!("{} builtin", name);
-                continue;
-            },
-            Some(m) => m,
+            Err(e) => return Err(e),
+            Ok(_) => {},
         };
-
-        // Fail if root mod or hard deps are missing.
-        // No recursive checking here; modules.dep entry is complete
-        // and doesn't contain Builtins.
-        let kmod_dst = kmod_dst_root.join(&root_mod.rel_path);
-        if paths_seen.insert(kmod_dst.clone()) {
-            let kmod_src = kmod_src_root.join(root_mod.rel_path);
-            archive_kmod_path(
-                &kmod_src,
-                &kmod_dst,
-                paths_seen,
-                cpio_state,
-                &mut cpio_writer
-            )?;
-        } else {
-            dout!("skipping duplicate kmod {:?} and all deps", &kmod_dst);
-            continue;
-        }
-
-        for dep_mod in root_mod.hard_deps.iter() {
-            // XXX would be faster to use modules.dep path entries directly
-            let m = match context.find(dep_mod) {
-                None => return Err(
-                            io::Error::new(
-                                io::ErrorKind::InvalidData,
-                                format!("failed to resolve path for {dep_mod}")
-                            )
-                        ),
-                Some(m) => m,
-            };
-
-            let kmod_dst = kmod_dst_root.join(&m.rel_path);
-            if paths_seen.insert(kmod_dst.clone()) {
-                let kmod_src = kmod_src_root.join(m.rel_path);
-                archive_kmod_path(
-                    &kmod_src,
-                    &kmod_dst,
-                    paths_seen,
-                    cpio_state,
-                    &mut cpio_writer
-                )?;
-            } else {
-                dout!("skipping duplicate kmod {:?}", &kmod_dst);
-            }
-        }
-
-        // Attempt to pull in soft and weak dependencies for root_mod.
-        // Not sure if we should be checking root_mod dependents.
-        for soft_mod in root_mod.soft_deps_pre.iter()
-            .chain(root_mod.soft_deps_post.iter())
-            .chain(root_mod.weak_deps.iter()) {
-            let m = match context.find(soft_mod) {
-                None => {
-                    dout!("{:?} soft / weak kernel dep not found", soft_mod);
-                    continue;
-                },
-                Some(m) if m.status == ModuleStatus::Builtin => continue,
-                Some(m) => m,
-            };
-            let kmod_dst = kmod_dst_root.join(&m.rel_path);
-            if paths_seen.insert(kmod_dst.clone()) {
-                let kmod_src = kmod_src_root.join(m.rel_path);
-                match archive_kmod_path(
-                    &kmod_src,
-                    &kmod_dst,
-                    paths_seen,
-                    cpio_state,
-                    &mut cpio_writer
-                ) {
-                    Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                        dout!("{:?} soft / weak kernel dep missing", &kmod_src);
-                        continue;
-                    },
-                    Err(e) => return Err(e),
-                    Ok(_) => {},
-                }
-            } else {
-                dout!("skipping duplicate kmod {:?}", &kmod_dst);
-            }
-        }
     }
 
     // add module_data_paths inside initrd
@@ -751,7 +775,7 @@ fn args_usage(params: &[Argument]) {
 
 fn args_process(
     inst: &mut Vec<(String, Option<String>)>,
-    kmods_out: &mut Vec<(String, Option<String>)>,
+    kmods_out: &mut Vec<String>,
     data: &mut Vec<GatherItem>,
 ) -> argument::Result<PathBuf> {
     let params = &[
@@ -797,11 +821,11 @@ fn args_process(
                 }
             }
             "install-kmod" => {
-                let kmod_parsed: argument::Result<Vec<(String, Option<String>)>> = value
+                let kmod_parsed: argument::Result<Vec<String>> = value
                     .unwrap()
                     .split(' ')
                     .map(|f| {
-                        f.parse().map(|s| (s, None)).map_err(|_| argument::Error::InvalidValue {
+                        f.parse().map_err(|_| argument::Error::InvalidValue {
                             value: f.to_owned(),
                             expected: String::from("MODULES must be utf-8 strings"),
                         })
@@ -866,7 +890,7 @@ fn main() -> io::Result<()> {
     struct State {
         bins: Gather,
         libs: Gather,
-        kmods: Gather,
+        kmods: Vec<String>,
         data: GatherData,
     }
 
@@ -882,12 +906,8 @@ fn main() -> io::Result<()> {
             missing: vec!(),
         },
         // TODO: kmods currently only tracks user-provided modules. Dependencies
-        // are omitted and @missing isn't filled.
-        kmods: Gather {
-            names: vec!(),
-            off: 0,
-            missing: vec!(),
-        },
+        // are omitted and missing mods aren't tracked.
+        kmods: vec!(),
         data: GatherData {
             items: vec!(GatherItem {
                 src: PathBuf::from(RAPIDO_CONF_PATH),
@@ -916,7 +936,7 @@ fn main() -> io::Result<()> {
 
     let cpio_out_path = match args_process(
         &mut state.bins.names,
-        &mut state.kmods.names,
+        &mut state.kmods,
         &mut state.data.items
     ) {
         Ok(p) => p,
