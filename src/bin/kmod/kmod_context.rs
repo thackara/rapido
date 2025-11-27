@@ -270,6 +270,8 @@ impl KmodContext {
         Ok(())
     }
 
+    // XXX we don't normalize @name, so e.g. "virtio-rng" won't (unlike
+    // modprobe) find virtio-rng.ko. Could fallback to dup+replace(?)
     pub fn find(&self, name: &str) -> Option<KmodModule> {
         if let Some(module) = self.modules_hash.get(name) {
             return Some(module.clone());
@@ -845,6 +847,7 @@ mod tests {
         let modules_dep_content = format!(
             "kernel/fs/fsmodule/fsmodule.ko.zst: kernel/lib/other_dep.ko\n\
              kernel/arch/x86/sub/mod32c-intel.ko.zst:\n\
+             kernel/drivers/char/hw_random/virtio-rng.ko.zst:\n\
              kernel/lib/other_dep.ko:\n"
         );
         write_test_file(&root_path, "modules.dep", &modules_dep_content);
@@ -908,7 +911,14 @@ mod tests {
             "Resolved module path is incorrect"
         );
 
-        // -- CLEANUP --
+        // find() requires the replace(-,_) name
+        assert_eq!(
+            context.find("virtio_rng").unwrap().rel_path,
+            Path::new("kernel/drivers/char/hw_random/virtio-rng.ko.zst"),
+        );
+        // using the original name with "-" fails
+        assert_eq!(context.find("virtio-rng"), None);
+
         cleanup_test_dir(&root_path);
     }
 }
