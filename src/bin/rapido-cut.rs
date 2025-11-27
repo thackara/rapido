@@ -647,6 +647,23 @@ fn gather_archive_kmods<W: Seek + Write>(
             Ok(_) => {},
         };
     }
+    for name in rapido::vm_kmod_deps(&conf, false) {
+        match gather_archive_kmod_and_deps(
+            name,
+            &kmod_src_root,
+            &kmod_dst_root,
+            &kmod_ctx,
+            paths_seen,
+            cpio_state,
+            &mut cpio_writer
+        ) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                eprintln!("failed to find {name}");
+            },
+            Err(e) => return Err(e),
+            Ok(_) => {},
+        };
+    }
 
     // add module_data_paths inside initrd
     for file_name in MODULE_DB_FILES.iter() {
@@ -905,8 +922,8 @@ fn main() -> io::Result<()> {
             off: 0,
             missing: vec!(),
         },
-        // TODO: kmods currently only tracks user-provided modules. Dependencies
-        // are omitted and missing mods aren't tracked.
+        // TODO: kmods currently only tracks user-requested modules.
+        // Dependencies are omitted and missing mods aren't tracked.
         kmods: vec!(),
         data: GatherData {
             items: vec!(GatherItem {
