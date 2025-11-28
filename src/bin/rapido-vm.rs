@@ -256,7 +256,7 @@ fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs> {
 fn vm_start(vm_num: u64, vm_pid_file: &str, initramfs_img: &str, conf: &HashMap<String,String>) -> io::Result<()> {
     let mut qemu_args = vm_qemu_args_get(conf)?;
     let mut kcmdline = format!(
-        "rdinit=/rapido-init console={} rapido.vm_num={}",
+        "rdinit=/init console={} rapido.vm_num={}",
         qemu_args.console,
         vm_num
     );
@@ -393,6 +393,7 @@ fn vm_start(vm_num: u64, vm_pid_file: &str, initramfs_img: &str, conf: &HashMap<
         .expect("failed to execute qemu");
     match spawned_vm.wait() {
         Err(e) => {
+            // TODO stdout / stderr lost here?
             eprintln!("{} failed: {:?}", qemu_args.qemu_bin, e);
             Err(io::Error::from(io::ErrorKind::BrokenPipe))
         },
