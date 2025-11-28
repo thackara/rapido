@@ -805,6 +805,7 @@ struct CutState {
     kmods: Vec<String>,
     data: GatherData,
     net_enabled: bool,
+    autoruns: u32,
 }
 
 fn args_usage(params: &[Argument]) {
@@ -828,6 +829,11 @@ fn args_process(state: &mut CutState) -> argument::Result<PathBuf> {
             "include",
             "SRC_PATH DEST_PATH",
             "space separated list of path pairs to install recursively.",
+        ),
+        Argument::value(
+            "autorun",
+            "PROGRAM",
+            "space separated list of files to execute on VM boot, in order.",
         ),
         Argument::flag("net", "Install network configuration and dependencies"),
         Argument::short_flag('h', "help", "Print help message."),
@@ -896,6 +902,43 @@ fn args_process(state: &mut CutState) -> argument::Result<PathBuf> {
                     });
                 }
             }
+            "autorun" => {
+                for file in value.unwrap().split(' ') {
+                    let src = PathBuf::from(file);
+                    if !src.is_file() {
+                        return Err(argument::Error::InvalidValue {
+                            value: file.to_owned(),
+                            expected: String::from("file missing"),
+                        });
+                    }
+                    let dst = match src.file_name() {
+                        None => return Err(
+                            argument::Error::InvalidValue {
+                                value: file.to_owned(),
+                                expected: String::from("bad file"),
+                            }
+                        ),
+                        Some(n) if n.to_str().is_none() => return Err(
+                            argument::Error::InvalidValue {
+                                value: file.to_owned(),
+                                expected: String::from("bad file"),
+                            }
+                        ),
+                        Some(n) => PathBuf::from(&format!(
+                            "/rapido_autorun/{:03}-{}",
+                            state.autoruns,
+                            n.to_str().unwrap()
+                        )),
+                    };
+                    // TODO: it'd be better if we place these after the rapido-rsc
+                    // entries, so that the boot time rsc check is faster.
+
+                    state.data.items.push(
+                        GatherItem { src, dst, flags: 0 }
+                    );
+                    state.autoruns += 1;
+                }
+            }
             "net" => state.net_enabled = true,
             "help" => return Err(argument::Error::PrintHelp),
             _ => unreachable!(),
@@ -959,6 +1002,7 @@ fn main() -> io::Result<()> {
             off: 0,
         },
         net_enabled: false,
+        autoruns: 0,
     };
 
     let conf = match fs::File::open(RAPIDO_CONF_PATH) {
