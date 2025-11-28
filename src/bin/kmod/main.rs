@@ -59,7 +59,7 @@ fn parse_all_args() -> Result<CliArgs, String> {
     Ok(parsed_args)
 }
 
-fn print_dep_line(dep_mod: KmodModule, prefix: &str) {
+fn print_dep_line(dep_mod: &KmodModule, prefix: &str) {
     let dep_icon = if prefix == "harddep" {
         "├──"
     } else {
@@ -123,11 +123,11 @@ fn print_paths_summary(title: &str, paths: Result<Vec<PathBuf>, String>) {
     }
 }
 
-fn collect_dependencies(
-    context: &KmodContext,
+fn collect_dependencies<'a>(
+    context: &'a KmodContext,
     modules: &[String],
-) -> Result<Vec<KmodModule>, String> {
-    let mut collected: HashMap<String, KmodModule> = HashMap::new();
+) -> Result<Vec<&'a KmodModule>, String> {
+    let mut collected: HashMap<String, &KmodModule> = HashMap::new();
 
     for name in modules {
         if let Some(kmodule) = context.find(name) {

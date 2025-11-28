@@ -528,7 +528,7 @@ fn gather_archive_kmod_and_deps<W: Seek + Write>(
     // and doesn't contain Builtins.
     let kmod_dst = kmod_dst_root.join(&root_mod.rel_path);
     if paths_seen.insert(kmod_dst.clone()) {
-        let kmod_src = kmod_src_root.join(root_mod.rel_path);
+        let kmod_src = kmod_src_root.join(&root_mod.rel_path);
         archive_kmod_path(
             &kmod_src,
             &kmod_dst,
@@ -555,7 +555,7 @@ fn gather_archive_kmod_and_deps<W: Seek + Write>(
 
         let kmod_dst = kmod_dst_root.join(&m.rel_path);
         if paths_seen.insert(kmod_dst.clone()) {
-            let kmod_src = kmod_src_root.join(m.rel_path);
+            let kmod_src = kmod_src_root.join(&m.rel_path);
             archive_kmod_path(
                 &kmod_src,
                 &kmod_dst,
@@ -583,7 +583,7 @@ fn gather_archive_kmod_and_deps<W: Seek + Write>(
         };
         let kmod_dst = kmod_dst_root.join(&m.rel_path);
         if paths_seen.insert(kmod_dst.clone()) {
-            let kmod_src = kmod_src_root.join(m.rel_path);
+            let kmod_src = kmod_src_root.join(&m.rel_path);
             match archive_kmod_path(
                 &kmod_src,
                 &kmod_dst,

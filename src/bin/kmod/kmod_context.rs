@@ -272,16 +272,16 @@ impl KmodContext {
 
     // XXX we don't normalize @name, so e.g. "virtio-rng" won't (unlike
     // modprobe) find virtio-rng.ko. Could fallback to dup+replace(?)
-    pub fn find(&self, name: &str) -> Option<KmodModule> {
+    pub fn find(&self, name: &str) -> Option<&KmodModule> {
         if let Some(module) = self.modules_hash.get(name) {
-            return Some(module.clone());
+            return Some(module);
         }
 
         // alias map (1-1)
 
         if let Some(actual_name) = self.alias_map.get(name) {
             if let Some(module) = self.modules_hash.get(actual_name) {
-                return Some(module.clone());
+                return Some(module);
             }
         }
 
@@ -692,7 +692,7 @@ mod tests {
         let found_alias = ctx
             .find("alias_target")
             .expect("Should find mod_target via alias");
-        assert_eq!(found_alias, target_module);
+        assert_eq!(*found_alias, target_module);
 
         // Builtin Module
         let found_builtin = ctx.find("builtin_mod").expect("Should find builtin_mod");
