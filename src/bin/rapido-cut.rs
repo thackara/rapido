@@ -25,6 +25,8 @@ const RAPIDO_INIT_PATH: &str = "target/release/rapido-init";
 const RAPIDO_CONF_PATH: &str = "rapido.conf";
 // FIXME: net-conf should come from rapido.conf or env(?)
 const RAPIDO_NET_CONF_PATH: &str = "net-conf";
+// FIXME: don't assume cwd location
+const RAPIDO_BASH_RC_PATH: &str = "vm_autorun.env";
 
 const GATHER_ITEM_MISSING: u32 =        1<<0;
 const GATHER_ITEM_IGNORE_PARENT: u32 =  1<<1;
@@ -923,7 +925,13 @@ fn args_process(state: &mut CutState) -> argument::Result<PathBuf> {
 fn main() -> io::Result<()> {
     let mut state = CutState {
         bins: Gather {
-            names: vec!((RAPIDO_INIT_PATH.to_string(), Some("/init".to_string()))),
+            names: vec!(
+                (RAPIDO_INIT_PATH.to_string(), Some("/init".to_string())),
+                // rapido-init core deps
+                ("mount".to_string(), None),
+                ("setsid".to_string(), None),
+                ("bash".to_string(), None),
+            ),
             off: 0,
             missing: vec!(),
         },
@@ -936,11 +944,18 @@ fn main() -> io::Result<()> {
         // Dependencies are omitted and missing mods aren't tracked.
         kmods: vec!(),
         data: GatherData {
-            items: vec!(GatherItem {
-                src: PathBuf::from(RAPIDO_CONF_PATH),
-                dst: PathBuf::from("/rapido.conf"),
-                flags: GATHER_ITEM_IGNORE_PARENT,
-            }),
+            items: vec!(
+                GatherItem {
+                    src: PathBuf::from(RAPIDO_CONF_PATH),
+                    dst: PathBuf::from("/rapido.conf"),
+                    flags: GATHER_ITEM_IGNORE_PARENT,
+                },
+                GatherItem {
+                    src: PathBuf::from(RAPIDO_BASH_RC_PATH),
+                    dst: PathBuf::from("/rapido.rc"),
+                    flags: GATHER_ITEM_IGNORE_PARENT,
+                },
+            ),
             off: 0,
         },
         net_enabled: false,
