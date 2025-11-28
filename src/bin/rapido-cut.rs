@@ -729,7 +729,7 @@ fn gather_archive_data<W: Seek + Write>(
                 println!("archived data dir: {:?}→{:?}", item.src, item.dst);
 
                 let mut entries = fs::read_dir(&item.src)?
-                    .map(|res| res.map(|e| e.path()))
+                    .map(|res| res.map(|e| e.file_name()))
                     .collect::<Result<Vec<_>, io::Error>>()?;
                 // sort for reproducibility
                 entries.sort();
