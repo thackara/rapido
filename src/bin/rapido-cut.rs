@@ -23,6 +23,8 @@ const LIB_PATHS: [&str; 3] = [ "/usr/lib64", "/usr/lib", "/usr/lib64/systemd" ];
 const RAPIDO_INIT_PATH: &str = "target/release/rapido-init";
 // FIXME: don't assume rapido.conf location, support env var
 const RAPIDO_CONF_PATH: &str = "rapido.conf";
+// FIXME: net-conf should come from rapido.conf or env(?)
+const RAPIDO_NET_CONF_PATH: &str = "net-conf";
 
 const GATHER_ITEM_MISSING: u32 =        1<<0;
 const GATHER_ITEM_IGNORE_PARENT: u32 =  1<<1;
@@ -647,23 +649,6 @@ fn gather_archive_kmods<W: Seek + Write>(
             Ok(_) => {},
         };
     }
-    for name in rapido::vm_kmod_deps(&conf, false) {
-        match gather_archive_kmod_and_deps(
-            name,
-            &kmod_src_root,
-            &kmod_dst_root,
-            &kmod_ctx,
-            paths_seen,
-            cpio_state,
-            &mut cpio_writer
-        ) {
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                eprintln!("failed to find {name}");
-            },
-            Err(e) => return Err(e),
-            Ok(_) => {},
-        };
-    }
 
     // add module_data_paths inside initrd
     for file_name in MODULE_DB_FILES.iter() {
@@ -786,15 +771,19 @@ fn gather_archive_data<W: Seek + Write>(
     Ok(())
 }
 
+struct CutState {
+    bins: Gather,
+    libs: Gather,
+    kmods: Vec<String>,
+    data: GatherData,
+    net_enabled: bool,
+}
+
 fn args_usage(params: &[Argument]) {
     argument::print_help("rapido-cut", "OUTPUT", params);
 }
 
-fn args_process(
-    inst: &mut Vec<(String, Option<String>)>,
-    kmods_out: &mut Vec<String>,
-    data: &mut Vec<GatherItem>,
-) -> argument::Result<PathBuf> {
+fn args_process(state: &mut CutState) -> argument::Result<PathBuf> {
     let params = &[
         Argument::positional("OUTPUT", "Write initramfs archive to this file path."),
         Argument::value(
@@ -812,6 +801,7 @@ fn args_process(
             "SRC_PATH DEST_PATH",
             "space separated list of path pairs to install recursively.",
         ),
+        Argument::flag("net", "Install network configuration and dependencies"),
         Argument::short_flag('h', "help", "Print help message."),
     ];
 
@@ -834,7 +824,7 @@ fn args_process(
                         },
                         Some((s, d)) => (s.to_string(), Some(d.to_string())),
                     };
-                    inst.push(file_parsed);
+                    state.bins.names.push(file_parsed);
                 }
             }
             "install-kmod" => {
@@ -848,7 +838,7 @@ fn args_process(
                         })
                     })
                     .collect();
-                kmods_out.append(&mut kmod_parsed?);
+                state.kmods.append(&mut kmod_parsed?);
             }
             "include" => {
                 let mut iter = value.unwrap().split(' ');
@@ -871,13 +861,14 @@ fn args_process(
                             dst
                         },
                     };
-                    data.push(GatherItem {
+                    state.data.items.push(GatherItem {
                         src: PathBuf::from(src),
                         dst,
                         flags: 0,
                     });
                 }
             }
+            "net" => state.net_enabled = true,
             "help" => return Err(argument::Error::PrintHelp),
             _ => unreachable!(),
         };
@@ -904,14 +895,7 @@ fn args_process(
 }
 
 fn main() -> io::Result<()> {
-    struct State {
-        bins: Gather,
-        libs: Gather,
-        kmods: Vec<String>,
-        data: GatherData,
-    }
-
-    let mut state = State {
+    let mut state = CutState {
         bins: Gather {
             names: vec!((RAPIDO_INIT_PATH.to_string(), Some("/init".to_string()))),
             off: 0,
@@ -933,6 +917,7 @@ fn main() -> io::Result<()> {
             }),
             off: 0,
         },
+        net_enabled: false,
     };
 
     let conf = match fs::File::open(RAPIDO_CONF_PATH) {
@@ -951,15 +936,37 @@ fn main() -> io::Result<()> {
         Err(_) => HashMap::new(),
     };
 
-    let cpio_out_path = match args_process(
-        &mut state.bins.names,
-        &mut state.kmods,
-        &mut state.data.items
-    ) {
+    let cpio_out_path = match args_process(&mut state) {
         Ok(p) => p,
         Err(argument::Error::PrintHelp) => return Ok(()),
         Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidInput, e.to_string())),
     };
+
+    // XXX would be nice to avoid all of the to_string() calls below...
+    state.kmods.extend(
+        rapido::vm_kmod_deps(&conf, state.net_enabled)
+            .into_iter()
+            .map(|s| s.to_string())
+    );
+    if state.net_enabled {
+        state.data.items.push(GatherItem {
+            src: PathBuf::from(RAPIDO_NET_CONF_PATH),
+            dst: PathBuf::from("/rapido-rsc/net"),
+            flags: 0,
+        });
+        state.bins.names.extend([
+            ("udevadm".to_string(), None),
+            ("systemd-udevd".to_string(), None),
+            ("systemd-networkd".to_string(), None),
+            ("systemd-networkd-wait-online".to_string(), None),
+            ("ip".to_string(), None),
+            ("ping".to_string(), None)
+        ]);
+    }
+    if state.kmods.len() > 0 {
+        // TODO only install if we have non-builtin kmods!
+        state.bins.names.extend([("modprobe".to_string(), None)]);
+    }
 
     let cpio_props = cpio::ArchiveProperties{
         // Attempt 4K file data alignment within archive for Btrfs/XFS reflinks
