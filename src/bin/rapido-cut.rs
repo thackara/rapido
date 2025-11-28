@@ -771,6 +771,32 @@ fn gather_archive_data<W: Seek + Write>(
     Ok(())
 }
 
+fn populate_default_symlinks<W: Seek + Write>(
+    paths_seen: &HashSet<PathBuf>,
+    cpio_state: &mut cpio::ArchiveState,
+    mut cpio_writer: W,
+) -> io::Result<()> {
+    let amd = cpio::ArchiveMd{
+            nlink: 1,
+            mode: cpio::S_IFLNK | 0o777,
+            uid: 0,
+            gid: 0,
+            mtime: 0,
+            rmajor: 0,
+            rminor: 0,
+            len: 0,
+    };
+
+    // on Tumbleweed, bash won't start without this symlink. /lib64 may already
+    // exist (e.g. it's a regular dir on Leap), so conditionally create it.
+    let p = Path::new("/lib64");
+    if !paths_seen.contains(p) {
+        let tgt = Path::new("usr/lib64");
+        cpio::archive_symlink(cpio_state, p, &amd, tgt, &mut cpio_writer)?;
+    }
+    Ok(())
+}
+
 struct CutState {
     bins: Gather,
     libs: Gather,
@@ -1022,6 +1048,8 @@ fn main() -> io::Result<()> {
         &mut cpio_state,
         &mut cpio_writer
     )?;
+
+    populate_default_symlinks(&paths_seen, &mut cpio_state, &mut cpio_writer)?;
 
     let len = cpio::archive_trailer(&mut cpio_state, &mut cpio_writer)?;
     cpio_writer.flush()?;
