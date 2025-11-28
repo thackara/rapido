@@ -153,12 +153,13 @@ fn kcli_parse(kcmdline: &[u8]) -> io::Result<KcliArgs> {
     Ok(args)
 }
 
+// FIXME: if all modules are builtin then rapido-cut won't install modprobe
 fn kmods_load(conf: &HashMap<String, String>, has_net: bool) -> io::Result<()> {
     let kmods = rapido::vm_kmod_deps(conf, has_net);
 
     if kmods.len() > 0 {
         match Command::new("modprobe")
-            .env("PATH", "/usr/sbin:/usr/bin")
+            .env("PATH", "/usr/sbin:/usr/bin:/sbin:/bin")
             .arg("-a")
             .args(&kmods)
             .status() {
@@ -250,7 +251,6 @@ fn init_network(kcli_args: &KcliArgs) -> io::Result<()> {
         return Err(io::Error::from(io::ErrorKind::BrokenPipe));
     }
 
-
     let mut entries = fs::read_dir("/sys/class/net/")?
         .map(|res| res.map(|e| e.path().into_os_string()))
         .collect::<Result<Vec<_>, io::Error>>()?;
@@ -302,11 +302,11 @@ fn init_shell(hostname: String) -> io::Result<()> {
     // rapido.rc starts subsequent autorun scripts
     // TODO future: allow for starting binary autorun payloads instead
     let mut spawned = Command::new("setsid")
-        .args(&["--ctty", "--", "/bin/bash", "--rcfile", "/rapido.rc", "-i"])
+        .args(&["--ctty", "--", "bash", "--rcfile", "/rapido.rc", "-i"])
         .envs([
             // RAPIDO_INIT indicates this (non-Dracut) init to vm_autorun, etc.
             ("RAPIDO_INIT", "0.1"),
-            ("PATH", "/usr/bin:/usr/sbin:."),
+            ("PATH", "/usr/sbin:/usr/bin:/sbin:/bin:."),
             ("TERM", "linux"),
             ("HOSTNAME", &hostname),
             ("PS1", format!("{}:${{PWD}}# ", hostname).as_str())

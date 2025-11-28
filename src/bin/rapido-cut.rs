@@ -17,8 +17,8 @@ mod kmod;
 use kmod::kmod_context::{KmodContext, ModuleStatus, MODULE_DB_FILES};
 extern crate kv_conf;
 
-const BIN_PATHS: [&str; 2] = [ "/usr/bin", "/usr/sbin" ];
-const LIB_PATHS: [&str; 2] = [ "/usr/lib64", "/usr/lib" ];
+const BIN_PATHS: [&str; 3] = [ "/usr/bin", "/usr/sbin", "/usr/lib/systemd" ];
+const LIB_PATHS: [&str; 3] = [ "/usr/lib64", "/usr/lib", "/usr/lib64/systemd" ];
 // FIXME: we shouldn't assume rapido-init location
 const RAPIDO_INIT_PATH: &str = "target/release/rapido-init";
 // FIXME: don't assume rapido.conf location, support env var
