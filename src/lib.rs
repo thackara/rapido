@@ -43,7 +43,8 @@ pub fn conf_src_or_host_kernel_vers(
     }
 }
 
-pub fn vm_kmod_deps(conf: &HashMap<String, String>, has_net: bool) -> Vec<&str> {
+// return kmod dependencies based on @has_net and rapido @conf qemu parameters
+pub fn conf_kmod_deps(conf: &HashMap<String, String>, has_net: bool) -> Vec<&str> {
     let mut deps = vec!();
 
     match conf.get("QEMU_EXTRA_ARGS") {
@@ -70,5 +71,15 @@ mod tests {
     fn test_host_kernel_vers_parse() {
         let line = b"Linux version 6.17.0-2-default (geeko@buildhost) (gcc (SUSE Linux) 15.2.0, GNU ld (GNU Binutils; openSUSE Tumbleweed) 2.43.1.20241209-10) #1 SMP PREEMPT_DYNAMIC Thu Oct  2 08:12:40 UTC 2025 (190326b)";
         assert_eq!(host_kernel_vers_parse(line).unwrap(), "6.17.0-2-default");
+    }
+
+    #[test]
+    fn test_conf_kmod_deps() {
+        let conf: HashMap<String, String> = HashMap::from([
+            ("QEMU_EXTRA_ARGS".to_string(), "-device virtio-rng-pci".to_string())
+        ]);
+        let kmods = conf_kmod_deps(&conf, true);
+        assert!(kmods.contains(&"virtio_rng"));
+        assert!(kmods.contains(&"virtio_net"));
     }
 }

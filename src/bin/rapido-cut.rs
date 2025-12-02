@@ -1029,7 +1029,7 @@ fn main() -> io::Result<()> {
 
     // XXX would be nice to avoid all of the to_string() calls below...
     state.kmods.extend(
-        rapido::vm_kmod_deps(&conf, state.net_enabled)
+        rapido::conf_kmod_deps(&conf, state.net_enabled)
             .into_iter()
             .map(|s| s.to_string())
     );

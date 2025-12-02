@@ -155,7 +155,7 @@ fn kcli_parse(kcmdline: &[u8]) -> io::Result<KcliArgs> {
 
 // FIXME: if all modules are builtin then rapido-cut won't install modprobe
 fn kmods_load(conf: &HashMap<String, String>, has_net: bool) -> io::Result<()> {
-    let kmods = rapido::vm_kmod_deps(conf, has_net);
+    let kmods = rapido::conf_kmod_deps(conf, has_net);
 
     if kmods.len() > 0 {
         match Command::new("modprobe")
