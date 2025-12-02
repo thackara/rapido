@@ -296,7 +296,7 @@ mod tests {
                 .read_exact(&mut buf)
                 .unwrap();
             for i in &buf {
-                s.push_str(&format!("{:02x}", i).to_string());
+                s.push_str(&format!("{:02x}", i));
             }
 
             let mut twd = TempWorkDir {
