@@ -809,12 +809,17 @@ struct CutState {
 }
 
 fn args_usage(params: &[Argument]) {
-    argument::print_help("rapido-cut", "OUTPUT", params);
+    argument::print_help("rapido-cut", "", params);
 }
 
-fn args_process(state: &mut CutState) -> argument::Result<PathBuf> {
+fn args_process(out_def: &str, state: &mut CutState) -> argument::Result<PathBuf> {
+    let mut cpio_output = PathBuf::from(out_def);
     let params = &[
-        Argument::positional("OUTPUT", "Write initramfs archive to this file path."),
+        Argument::value(
+            "output",
+            "INITRAMFS",
+            "Write initramfs archive to this file path."
+        ),
         Argument::value(
             "install",
             "FILES",
@@ -839,11 +844,11 @@ fn args_process(state: &mut CutState) -> argument::Result<PathBuf> {
         Argument::short_flag('h', "help", "Print help message."),
     ];
 
-    let mut positional_args = 0;
     let args = env::args().skip(1); // skip binary name
     let match_res = argument::set_arguments(args, params, |name, value| {
+        // unwrap: set_arguments(f) value will be Some if arg requires one
         match name {
-            "" => positional_args += 1,
+            "output" => cpio_output = PathBuf::from(value.unwrap()),
             "install" => {
                 for file in value.unwrap().split_whitespace() {
                     let file_parsed = match file.split_once('→') {
@@ -946,23 +951,12 @@ fn args_process(state: &mut CutState) -> argument::Result<PathBuf> {
         Ok(())
     });
 
-    match match_res {
-        Ok(_) => {
-            if positional_args != 1 {
-                args_usage(params);
-                return Err(argument::Error::ExpectedArgument(
-                    "one OUTPUT parameter required".to_string(),
-                ));
-            }
-        }
-        Err(e) => {
-            args_usage(params);
-            return Err(e);
-        }
+    if let Err(e) = match_res {
+        args_usage(params);
+        return Err(e);
     }
 
-    let last_arg = env::args_os().last().unwrap();
-    Ok(PathBuf::from(&last_arg))
+    Ok(cpio_output)
 }
 
 fn main() -> io::Result<()> {
@@ -1005,23 +999,14 @@ fn main() -> io::Result<()> {
         autoruns: 0,
     };
 
-    let conf = match fs::File::open(RAPIDO_CONF_PATH) {
-        Ok(f) => {
-            let mut reader = io::BufReader::new(f);
-            match kv_conf::kv_conf_process(&mut reader) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("failed to process {}: {:?}", RAPIDO_CONF_PATH, e);
-                    return Err(e);
-                }
-            }
-        }
-        // handle no rapido.conf
-        // TODO: set defaults, considering env vars
-        Err(_) => HashMap::new(),
-    };
-
-    let cpio_out_path = match args_process(&mut state) {
+    // TODO: don't assume CWD=rapido_dir
+    let cur_dir = env::current_dir()?;
+    let conf = rapido::conf_parse_from_defaults(cur_dir)?;
+    let cpio_out_path = match args_process(
+        // unwrap: DRACUT_OUT default set prior to conf parsing
+        conf.get("DRACUT_OUT").unwrap(),
+        &mut state
+    ) {
         Ok(p) => p,
         Err(argument::Error::PrintHelp) => return Ok(()),
         Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidInput, e.to_string())),
