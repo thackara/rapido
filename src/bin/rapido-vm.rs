@@ -405,46 +405,11 @@ fn vm_start(vm_num: u64, vm_pid_file: &str, initramfs_img: &str, conf: &HashMap<
     }
 }
 
-fn vm_rapido_conf(rapido_dir: &str) -> io::Result<HashMap<String, String>> {
-    let rapido_conf = format!("{}/rapido.conf", rapido_dir);
-    // set a bunch of defaults, which may be overridden by rapido.conf
-    let mut conf: HashMap<String, String> = HashMap::from([
-        // Dracut initramfs output path and QEMU input
-        ("DRACUT_OUT".to_string(), format!("{}/initrds/myinitrd", rapido_dir)),
-        // default directory to write QEMU pidfiles
-        ("QEMU_PID_DIR".to_string(), format!("{}/initrds", rapido_dir)),
-        // default VM network config path, also used for tap provisioning
-        ("VM_NET_CONF".to_string(), format!("{}/net-conf", rapido_dir)),
-        // QEMU defaults: CLI with console redirection. Provide VMs with an RNG device.
-        ("QEMU_EXTRA_ARGS".to_string(), "-nographic -device virtio-rng-pci".to_string()),
-    ]);
-
-    let f = match fs::File::open(&rapido_conf) {
-        Ok(f) => f,
-        Err(e) => {
-            println!("failed to open {}: {}", rapido_conf, e);
-            return Err(e);
-        },
-    };
-    let mut reader = io::BufReader::new(f);
-    match kv_conf::kv_conf_process_append(&mut reader, &mut conf) {
-        Ok(_) => {},
-        Err(e) => {
-            println!("failed to process {}: {:?}", rapido_conf, e);
-            return Err(e);
-        },
-    };
-    Ok(conf)
-}
-
 fn main() -> io::Result<()> {
+    // TODO: don't assume CWD=rapido_dir
     let cur_dir = env::current_dir()?;
-    let rapido_dir = match cur_dir.to_str() {
-        None => return Err(io::Error::from(io::ErrorKind::InvalidInput)),
-        Some(s) => s,
-    };
-
-    let conf = vm_rapido_conf(rapido_dir)?;
+    let conf = rapido::conf_parse_from_defaults(cur_dir)?;
+    // unwrap: both keys have defaults set prior to conf parsing
     let pid_dir = conf.get("QEMU_PID_DIR").unwrap();
     let initramfs_img = conf.get("DRACUT_OUT").unwrap();
 
