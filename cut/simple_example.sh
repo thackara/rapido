@@ -1,40 +1,35 @@
 #!/bin/bash
 # SPDX-License-Identifier: (LGPL-2.1 OR LGPL-3.0)
-# Copyright (C) SUSE LLC 2018-2021, all rights reserved.
-
-RAPIDO_DIR="$(realpath -e ${0%/*})/.."
-. "${RAPIDO_DIR}/runtime.vars"
+# Copyright (C) SUSE SA 2018-2025, all rights reserved.
 
 # The job of Rapido cut scripts is to generate a VM image. This is done using
-# Dracut with a number of parameters...
+# rapido-cut with a number of parameters...
 
-# Call _rt_require_dracut_args() providing script paths that will be included
-# and run on VM boot. It exports variables used in the dracut invocation below.
-_rt_require_dracut_args "$RAPIDO_DIR/autorun/simple_example.sh" "$@"
-
-# _rt_require_networking() flags that VMs using this image should have a network
-# adapter. Binaries and configuration required for networking are appended to
-# DRACUT_RAPIDO_ARGS.
-#_rt_require_networking
-
-# VMs are booted with 2 vCPUs and 512M RAM by default. These defaults can be
-# changed, e.g. 1 vCPU + 1G RAM could be specified via:
-#_rt_cpu_resources_set 1
-#_rt_mem_resources_set 1G
+# --autorun specifies script paths that will be installed and run (in order) on
+# VM boot.
 
 # --install provides a list of binaries that should be included in the VM image.
 # Dracut will resolve shared object dependencies and add them automatically.
 
-# --include copies a specific file or directory to the given image destination.
+# --include copies a specific file or directory-tree to the given image
+# destination.
 
-# --add-drivers provides a list of kernel modules, which will be obtained from
-# the rapido.conf KERNEL_INSTALL_MOD_PATH
+# --install-kmod provides a list of kernel modules, which will be obtained from
+# the rapido.conf KERNEL_INSTALL_MOD_PATH directory, or host kernel modules
+# directory if unset.
+./target/release/rapido-cut \
+	--autorun "autorun/simple_example.sh $*" \
+	--install "resize ls sleep ps rmdir dd mkfs.xfs" \
+	--install-kmod "zram lzo lzo_rle"
 
-# --modules provides a list of *Dracut* modules. See Dracut documentation for
-# details
-"$DRACUT" \
-	--install "resize ps rmdir dd mkfs.xfs" \
-	--add-drivers "zram lzo lzo-rle" \
-	--modules "base" \
-	"${DRACUT_RAPIDO_ARGS[@]}" \
-	"$DRACUT_OUT" || _fail "dracut failed"
+# rapido-cut writes the initramfs image to the rapido.conf DRACUT_OUT specified
+# path, or an explicit path provided via --output parameter.
+
+# rapido-vm boots images with 2 vCPUs and 512M RAM by default. These
+# defaults can be changed, e.g. 1 vCPU + 1G RAM could be specified via:
+#--include "dracut.conf.d/.empty /rapido-rsc/cpu/1"
+#--include "dracut.conf.d/.empty /rapido-rsc/mem/1G"
+
+# rapido VMs are not networked by default. To add networking configuration
+# (see rapido.conf NET_CONF) and systemd-network dependencies to the image,
+# append the parameter: --net
