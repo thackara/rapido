@@ -845,7 +845,7 @@ fn args_process(state: &mut CutState) -> argument::Result<PathBuf> {
         match name {
             "" => positional_args += 1,
             "install" => {
-                for file in value.unwrap().split(' ') {
+                for file in value.unwrap().split_whitespace() {
                     let file_parsed = match file.split_once('→') {
                         // source only
                         None => (file.to_string(), None),
@@ -864,7 +864,7 @@ fn args_process(state: &mut CutState) -> argument::Result<PathBuf> {
             "install-kmod" => {
                 let kmod_parsed: argument::Result<Vec<String>> = value
                     .unwrap()
-                    .split(' ')
+                    .split_whitespace()
                     .map(|f| {
                         f.parse().map_err(|_| argument::Error::InvalidValue {
                             value: f.to_owned(),
@@ -875,7 +875,7 @@ fn args_process(state: &mut CutState) -> argument::Result<PathBuf> {
                 state.kmods.append(&mut kmod_parsed?);
             }
             "include" => {
-                let mut iter = value.unwrap().split(' ');
+                let mut iter = value.unwrap().split_whitespace();
                 while let Some(src) = iter.next() {
                     let dst = match iter.next() {
                         None => return Err(argument::Error::InvalidValue {
@@ -903,7 +903,7 @@ fn args_process(state: &mut CutState) -> argument::Result<PathBuf> {
                 }
             }
             "autorun" => {
-                for file in value.unwrap().split(' ') {
+                for file in value.unwrap().split_whitespace() {
                     let src = PathBuf::from(file);
                     if !src.is_file() {
                         return Err(argument::Error::InvalidValue {
