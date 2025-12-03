@@ -291,7 +291,7 @@ fn init_network(kcli_args: &KcliArgs) -> io::Result<()> {
         .status()
         .expect("failed to execute systemd-networkd-wait-online");
     if !status.success() {
-        eprintln!("systemd-networkd-wait-online failed to start");
+        eprintln!("systemd-networkd-wait-online failed");
         return Err(io::Error::from(io::ErrorKind::BrokenPipe));
     }
 
