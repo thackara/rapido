@@ -240,7 +240,7 @@ fn gather_archive_dirs<W: Seek + Write>(
         }
 
         cpio::archive_path(cpio_state, &here, &parent_dirs_amd, &mut cpio_writer)?;
-        println!("archived dir: {:?}", here);
+        dout!("archived dir: {:?}", here);
     }
 
     Ok(())
@@ -331,7 +331,7 @@ fn gather_archive_bins<W: Seek + Write>(
                     &canon_tgt,
                     &mut cpio_writer
                 )?;
-                println!("archived symlink: {:?} ({:?})", got.path, canon_tgt);
+                dout!("archived symlink: {:?} ({:?})", got.path, canon_tgt);
 
                 if let Ok(t) = canon_tgt.into_os_string().into_string() {
                     bins.names.push((t, None));
@@ -351,11 +351,11 @@ fn gather_archive_bins<W: Seek + Write>(
                     cpio_state,
                     &mut cpio_writer
                 )?;
-                println!("archived bin: {:?}→{:?}", got.path, dst);
+                dout!("archived bin: {:?}→{:?}", got.path, dst);
             },
             _ => {
                 cpio::archive_path(cpio_state, &dst, &amd, &mut cpio_writer)?;
-                println!("archived other: {:?}→{:?}", got.path, dst);
+                dout!("archived other: {:?}→{:?}", got.path, dst);
             },
         };
     }
@@ -413,7 +413,7 @@ fn gather_archive_libs<W: Seek + Write>(
                     &canon_tgt,
                     &mut cpio_writer
                 )?;
-                println!("archived lib symlink: {:?} ({:?})", got.path, canon_tgt);
+                dout!("archived lib symlink: {:?} ({:?})", got.path, canon_tgt);
 
                 if let Ok(t) = canon_tgt.into_os_string().into_string() {
                     libs.names.push((t, None));
@@ -433,7 +433,7 @@ fn gather_archive_libs<W: Seek + Write>(
                     cpio_state,
                     &mut cpio_writer
                 )?;
-                println!("archived lib: {:?}", got.path);
+                dout!("archived lib: {:?}", got.path);
             },
             _ => {
                 // only support file/symlink library entries
@@ -474,7 +474,7 @@ fn archive_kmod_path<W: Seek + Write>(
         &kmod_f,
         cpio_writer,
     )?;
-    println!("archived kmod: {:?} -> {:?}", src, dst);
+    dout!("archived kmod: {:?} -> {:?}", src, dst);
     Ok(())
 }
 
@@ -503,7 +503,7 @@ fn archive_kmods_symlink<W: Seek + Write>(
         len: 0,
     };
     cpio::archive_symlink(cpio_state, &p, &amd, &tgt, &mut cpio_writer)?;
-    println!("archived kmod symlink {:?} ({:?})", p, tgt);
+    dout!("archived kmod symlink {:?} ({:?})", p, tgt);
     Ok(())
 }
 
@@ -713,7 +713,7 @@ fn gather_archive_data<W: Seek + Write>(
                     &src_amd,
                     &mut cpio_writer
                 )?;
-                println!("archived data dir: {:?}→{:?}", item.src, item.dst);
+                dout!("archived data dir: {:?}→{:?}", item.src, item.dst);
 
                 let mut entries = fs::read_dir(&item.src)?
                     .map(|res| res.map(|e| e.file_name()))
@@ -744,7 +744,7 @@ fn gather_archive_data<W: Seek + Write>(
                     &f,
                     &mut cpio_writer
                 )?;
-                println!("archived data file: {:?}→{:?}", item.src, item.dst);
+                dout!("archived data file: {:?}→{:?}", item.src, item.dst);
             },
             cpio::S_IFLNK => {
                 let tgt = fs::read_link(&item.src)?;
@@ -756,7 +756,7 @@ fn gather_archive_data<W: Seek + Write>(
                     &tgt,
                     &mut cpio_writer
                 )?;
-                println!("archived data symlink: {:?}→{:?}", item.src, item.dst);
+                dout!("archived data symlink: {:?}→{:?}", item.src, item.dst);
             },
             _ => {
                 cpio::archive_path(
@@ -765,7 +765,7 @@ fn gather_archive_data<W: Seek + Write>(
                     &src_amd,
                     &mut cpio_writer
                 )?;
-                println!("archived data path: {:?}→{:?}", item.src, item.dst);
+                dout!("archived data path: {:?}→{:?}", item.src, item.dst);
             },
         };
     }
