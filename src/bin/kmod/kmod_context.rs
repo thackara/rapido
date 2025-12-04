@@ -38,7 +38,7 @@ pub enum ModuleStatus {
 pub struct KmodModule {
     pub status: ModuleStatus,
     // rel_path is relative to KmodContext.module_root
-    pub rel_path: PathBuf,
+    pub rel_path: String,
     pub hard_deps_paths: Vec<String>,
     pub soft_deps_pre: Vec<String>,
     pub soft_deps_post: Vec<String>,
@@ -76,9 +76,7 @@ fn extract_module_name(path_str: &str) -> String {
 
 impl KmodModule {
     pub fn name(&self) -> String {
-        // unwrap: UTF-8 already checked by BufReader.lines()
-        let p = &self.rel_path.as_os_str().to_str().unwrap();
-        extract_module_name(&p)
+        extract_module_name(&self.rel_path)
     }
 
     pub fn hard_deps(&self) -> Vec<String> {
@@ -141,7 +139,7 @@ impl KmodContext {
                 module_name,
                 KmodModule {
                     status: ModuleStatus::LoadableModule,
-                    rel_path: PathBuf::from(module_path_str),
+                    rel_path: String::from(module_path_str),
                     hard_deps_paths: dep_paths,
                     soft_deps_pre: Vec::new(),
                     soft_deps_post: Vec::new(),
@@ -237,7 +235,7 @@ impl KmodContext {
                 module_name,
                 KmodModule {
                     status: ModuleStatus::Builtin,
-                    rel_path: PathBuf::new(),
+                    rel_path: String::new(),
                     hard_deps_paths: Vec::new(),
                     soft_deps_pre: Vec::new(),
                     soft_deps_post: Vec::new(),
@@ -412,7 +410,7 @@ mod tests {
         // Check mod_a
         let mod_a = ctx.modules_hash.get("mod_a").expect("mod_a not found");
         assert_eq!(mod_a.status, ModuleStatus::LoadableModule);
-        assert_eq!(mod_a.rel_path, Path::new("kernel/mod_a.ko"));
+        assert_eq!(mod_a.rel_path, "kernel/mod_a.ko");
         assert_eq!(
             mod_a.hard_deps_paths,
             vec!["kernel/dep1.ko", "kernel/dep2.ko.xz"],
@@ -427,7 +425,7 @@ mod tests {
         // Check mod_b (normalization and no deps)
         let mod_b = ctx.modules_hash.get("mod_b").expect("mod_b not found");
         assert_eq!(mod_b.status, ModuleStatus::LoadableModule);
-        assert_eq!(mod_b.rel_path, Path::new("kernel/mod-b.ko"));
+        assert_eq!(mod_b.rel_path, "kernel/mod-b.ko");
         assert!(mod_b.hard_deps().is_empty(), "mod_b should have no hard deps");
 
         cleanup_test_dir(&root_path);
@@ -461,7 +459,7 @@ mod tests {
             "mod_a".to_string(),
             KmodModule {
                 status: ModuleStatus::LoadableModule,
-                rel_path: PathBuf::new(),
+                rel_path: String::new(),
                 hard_deps_paths: Vec::new(),
                 soft_deps_pre: Vec::new(),
                 soft_deps_post: Vec::new(),
@@ -507,7 +505,7 @@ mod tests {
             "mod_a".to_string(),
             KmodModule {
                 status: ModuleStatus::LoadableModule,
-                rel_path: PathBuf::new(),
+                rel_path: String::new(),
                 hard_deps_paths: Vec::new(),
                 soft_deps_pre: Vec::new(),
                 soft_deps_post: Vec::new(),
@@ -518,7 +516,7 @@ mod tests {
             "mod_b".to_string(),
             KmodModule {
                 status: ModuleStatus::LoadableModule,
-                rel_path: PathBuf::new(),
+                rel_path: String::new(),
                 hard_deps_paths: Vec::new(),
                 soft_deps_pre: Vec::new(),
                 soft_deps_post: Vec::new(),
@@ -580,7 +578,7 @@ mod tests {
             "builtin_mod1 status incorrect"
         );
         assert!(
-            mod1.rel_path.as_os_str().is_empty(),
+            mod1.rel_path.is_empty(),
             "Builtin path should be empty"
         );
 
@@ -633,7 +631,7 @@ mod tests {
             "mod_target".to_string(),
             KmodModule {
                 status: ModuleStatus::LoadableModule,
-                rel_path: PathBuf::new(),
+                rel_path: String::new(),
                 hard_deps_paths: Vec::new(),
                 soft_deps_pre: Vec::new(),
                 soft_deps_post: Vec::new(),
@@ -672,7 +670,7 @@ mod tests {
         // setup KmodModule for find calls
         let target_module = KmodModule {
             status: ModuleStatus::LoadableModule,
-            rel_path: PathBuf::from("kernel/target.ko"),
+            rel_path: String::from("kernel/target.ko"),
             hard_deps_paths: vec!["kernel/dep1.ko".to_string()],
             soft_deps_pre: Vec::new(),
             soft_deps_post: Vec::new(),
@@ -686,7 +684,7 @@ mod tests {
             "builtin_mod".to_string(),
             KmodModule {
                 status: ModuleStatus::Builtin,
-                rel_path: PathBuf::new(),
+                rel_path: String::new(),
                 hard_deps_paths: Vec::new(),
                 soft_deps_pre: Vec::new(),
                 soft_deps_post: Vec::new(),
@@ -772,7 +770,7 @@ mod tests {
         assert_eq!(mod_a.status, ModuleStatus::LoadableModule);
         assert_eq!(
             mod_a.rel_path,
-            Path::new("kernel/mod_a.ko"),
+            "kernel/mod_a.ko",
             "Path should point to the module file"
         );
         assert_eq!(
@@ -806,7 +804,7 @@ mod tests {
         assert_eq!(mod_b.status, ModuleStatus::LoadableModule);
         assert_eq!(
             mod_b.rel_path,
-            Path::new("kernel/mod_b.ko.xz"),
+            "kernel/mod_b.ko.xz",
             "Path should point to the compressed module file"
         );
         assert_eq!(
@@ -926,14 +924,14 @@ mod tests {
         );
         assert_eq!(
             aliased_mod.rel_path,
-            Path::new("kernel/arch/x86/sub/mod32c-intel.ko.zst"),
+            "kernel/arch/x86/sub/mod32c-intel.ko.zst",
             "Resolved module path is incorrect"
         );
 
         // find() requires the replace(-,_) name
         assert_eq!(
             context.find("virtio_rng").unwrap().rel_path,
-            Path::new("kernel/drivers/char/hw_random/virtio-rng.ko.zst"),
+            "kernel/drivers/char/hw_random/virtio-rng.ko.zst",
         );
         // using the original name with "-" fails
         assert_eq!(context.find("virtio-rng"), None);
