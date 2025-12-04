@@ -39,7 +39,7 @@ pub struct KmodModule {
     pub status: ModuleStatus,
     // rel_path is relative to KmodContext.module_root
     pub rel_path: PathBuf,
-    pub hard_deps: Vec<String>,
+    pub hard_deps_paths: Vec<String>,
     pub soft_deps_pre: Vec<String>,
     pub soft_deps_post: Vec<String>,
     pub weak_deps: Vec<String>,
@@ -79,6 +79,10 @@ impl KmodModule {
         // unwrap: UTF-8 already checked by BufReader.lines()
         let p = &self.rel_path.as_os_str().to_str().unwrap();
         extract_module_name(&p)
+    }
+
+    pub fn hard_deps(&self) -> Vec<String> {
+        self.hard_deps_paths.iter().map(|p| extract_module_name(&p)).collect()
     }
 }
 
@@ -127,12 +131,10 @@ impl KmodContext {
             let module_path_str = parts[0].trim();
             let module_name = extract_module_name(module_path_str);
 
-            // Collect dependency names
-            // TODO: keep paths and generate hard_deps on demand as impl
-            let dep_names: Vec<String> = parts[1]
+            let dep_paths: Vec<String> = parts[1]
                 .trim()
                 .split_whitespace()
-                .map(|p| extract_module_name(p))
+                .map(|p| p.to_string())
                 .collect();
 
             match self.modules_hash.insert(
@@ -140,7 +142,7 @@ impl KmodContext {
                 KmodModule {
                     status: ModuleStatus::LoadableModule,
                     rel_path: PathBuf::from(module_path_str),
-                    hard_deps: dep_names,
+                    hard_deps_paths: dep_paths,
                     soft_deps_pre: Vec::new(),
                     soft_deps_post: Vec::new(),
                     weak_deps: Vec::new(),
@@ -236,7 +238,7 @@ impl KmodContext {
                 KmodModule {
                     status: ModuleStatus::Builtin,
                     rel_path: PathBuf::new(),
-                    hard_deps: Vec::new(),
+                    hard_deps_paths: Vec::new(),
                     soft_deps_pre: Vec::new(),
                     soft_deps_post: Vec::new(),
                     weak_deps: Vec::new(),
@@ -412,7 +414,12 @@ mod tests {
         assert_eq!(mod_a.status, ModuleStatus::LoadableModule);
         assert_eq!(mod_a.rel_path, Path::new("kernel/mod_a.ko"));
         assert_eq!(
-            mod_a.hard_deps,
+            mod_a.hard_deps_paths,
+            vec!["kernel/dep1.ko", "kernel/dep2.ko.xz"],
+            "Hard deps paths for mod_a incorrect"
+        );
+        assert_eq!(
+            mod_a.hard_deps(),
             vec!["dep1", "dep2"],
             "Hard deps for mod_a incorrect"
         );
@@ -421,7 +428,7 @@ mod tests {
         let mod_b = ctx.modules_hash.get("mod_b").expect("mod_b not found");
         assert_eq!(mod_b.status, ModuleStatus::LoadableModule);
         assert_eq!(mod_b.rel_path, Path::new("kernel/mod-b.ko"));
-        assert!(mod_b.hard_deps.is_empty(), "mod_b should have no hard deps");
+        assert!(mod_b.hard_deps().is_empty(), "mod_b should have no hard deps");
 
         cleanup_test_dir(&root_path);
     }
@@ -455,7 +462,7 @@ mod tests {
             KmodModule {
                 status: ModuleStatus::LoadableModule,
                 rel_path: PathBuf::new(),
-                hard_deps: Vec::new(),
+                hard_deps_paths: Vec::new(),
                 soft_deps_pre: Vec::new(),
                 soft_deps_post: Vec::new(),
                 weak_deps: Vec::new(),
@@ -501,7 +508,7 @@ mod tests {
             KmodModule {
                 status: ModuleStatus::LoadableModule,
                 rel_path: PathBuf::new(),
-                hard_deps: Vec::new(),
+                hard_deps_paths: Vec::new(),
                 soft_deps_pre: Vec::new(),
                 soft_deps_post: Vec::new(),
                 weak_deps: Vec::new(),
@@ -512,7 +519,7 @@ mod tests {
             KmodModule {
                 status: ModuleStatus::LoadableModule,
                 rel_path: PathBuf::new(),
-                hard_deps: Vec::new(),
+                hard_deps_paths: Vec::new(),
                 soft_deps_pre: Vec::new(),
                 soft_deps_post: Vec::new(),
                 weak_deps: Vec::new(),
@@ -627,7 +634,7 @@ mod tests {
             KmodModule {
                 status: ModuleStatus::LoadableModule,
                 rel_path: PathBuf::new(),
-                hard_deps: Vec::new(),
+                hard_deps_paths: Vec::new(),
                 soft_deps_pre: Vec::new(),
                 soft_deps_post: Vec::new(),
                 weak_deps: Vec::new(),
@@ -666,7 +673,7 @@ mod tests {
         let target_module = KmodModule {
             status: ModuleStatus::LoadableModule,
             rel_path: PathBuf::from("kernel/target.ko"),
-            hard_deps: vec!["dep1".to_string()],
+            hard_deps_paths: vec!["kernel/dep1.ko".to_string()],
             soft_deps_pre: Vec::new(),
             soft_deps_post: Vec::new(),
             weak_deps: Vec::new(),
@@ -680,7 +687,7 @@ mod tests {
             KmodModule {
                 status: ModuleStatus::Builtin,
                 rel_path: PathBuf::new(),
-                hard_deps: Vec::new(),
+                hard_deps_paths: Vec::new(),
                 soft_deps_pre: Vec::new(),
                 soft_deps_post: Vec::new(),
                 weak_deps: Vec::new(),
@@ -692,7 +699,7 @@ mod tests {
             .find("mod_target")
             .expect("Should find mod_target directly");
         assert_eq!(found_direct.status, ModuleStatus::LoadableModule);
-        assert_eq!(found_direct.hard_deps.len(), 1);
+        assert_eq!(found_direct.hard_deps_paths.len(), 1);
 
         // alias hit
         let found_alias = ctx
@@ -769,7 +776,12 @@ mod tests {
             "Path should point to the module file"
         );
         assert_eq!(
-            mod_a.hard_deps,
+            mod_a.hard_deps_paths,
+            vec!["kernel/mod_b.ko.xz", "kernel/mod_c.ko"],
+            "hard dependencies check failed"
+        );
+        assert_eq!(
+            mod_a.hard_deps(),
             vec!["mod_b", "mod_c"],
             "hard dependencies check failed"
         );
@@ -798,7 +810,7 @@ mod tests {
             "Path should point to the compressed module file"
         );
         assert_eq!(
-            mod_b.hard_deps.len(),
+            mod_b.hard_deps_paths.len(),
             0,
             "mod_b should have no hard dependencies"
         );

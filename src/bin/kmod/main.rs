@@ -82,7 +82,7 @@ fn print_direct_deps(context: &KmodContext, root_name: &str) {
 
     println!("🔗 {} ({:?})", root_mod.name(), root_mod.status);
 
-    for dep_mod_name in &root_mod.hard_deps {
+    for dep_mod_name in &root_mod.hard_deps() {
         if let Some(dep_mod) = context.find(dep_mod_name) {
             print_dep_line(dep_mod, "harddep");
         }
@@ -131,8 +131,8 @@ fn collect_dependencies<'a>(
 
     for name in modules {
         if let Some(kmodule) = context.find(name) {
-            let all_deps: Vec<&String> = kmodule
-                .hard_deps
+            let hard_deps = kmodule.hard_deps();
+            let all_deps: Vec<&String> = hard_deps
                 .iter()
                 .chain(kmodule.soft_deps_pre.iter())
                 .chain(kmodule.soft_deps_post.iter())

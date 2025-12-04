@@ -543,21 +543,10 @@ fn gather_archive_kmod_and_deps<W: Seek + Write>(
         return Ok(());
     }
 
-    for dep_mod in root_mod.hard_deps.iter() {
-        // XXX would be faster to use modules.dep path entries directly
-        let m = match context.find(dep_mod) {
-            None => return Err(
-                        io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            format!("failed to resolve path for {dep_mod}")
-                        )
-                    ),
-            Some(m) => m,
-        };
-
-        let kmod_dst = kmod_dst_root.join(&m.rel_path);
+    for dep_path in root_mod.hard_deps_paths.iter() {
+        let kmod_dst = kmod_dst_root.join(&dep_path);
         if paths_seen.insert(kmod_dst.clone()) {
-            let kmod_src = kmod_src_root.join(&m.rel_path);
+            let kmod_src = kmod_src_root.join(&dep_path);
             archive_kmod_path(
                 &kmod_src,
                 &kmod_dst,
