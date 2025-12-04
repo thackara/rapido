@@ -80,7 +80,7 @@ fn print_direct_deps(context: &KmodContext, root_name: &str) {
         }
     };
 
-    println!("🔗 {} ({:?})", root_mod.name(), root_mod.status);
+    println!("🔗 {} ({:?})", root_name, root_mod.status);
 
     for dep_mod_name in &root_mod.hard_deps() {
         if let Some(dep_mod) = context.find(dep_mod_name) {
@@ -126,7 +126,7 @@ fn print_paths_summary(title: &str, paths: Result<Vec<PathBuf>, String>) {
 fn collect_dependencies<'a>(
     context: &'a KmodContext,
     modules: &[String],
-) -> Result<Vec<&'a KmodModule>, String> {
+) -> Result<HashMap<String, &'a KmodModule>, String> {
     let mut collected: HashMap<String, &KmodModule> = HashMap::new();
 
     for name in modules {
@@ -143,14 +143,16 @@ fn collect_dependencies<'a>(
                     collected.entry(dep_mod_name.clone()).or_insert(dep_mod);
                 }
             }
-            collected.entry(kmodule.name()).or_insert(kmodule);
+            collected.entry(name.clone()).or_insert(kmodule);
         }
     }
-    Ok(collected.into_values().collect())
+    Ok(collected)
 }
 
 fn collect_module_paths(context: &KmodContext, modules: &[String]) -> Result<Vec<PathBuf>, String> {
-    let paths: HashSet<PathBuf> = collect_dependencies(context, modules)?
+    let collected = collect_dependencies(context, modules)?;
+    let paths: HashSet<PathBuf> = collected
+        .into_values()
         .into_iter()
         // filter out built-in modules
         .filter(|kmod| kmod.status != ModuleStatus::Builtin)
@@ -229,8 +231,8 @@ fn main() {
                         "\n--- Collected UNIQUE module names ({} found) ---",
                         modules.len()
                     );
-                    for module in modules {
-                        println!("  - {}: {:?}", module.name(), module.status);
+                    for (name, module) in modules.iter() {
+                        println!("  - {}: {:?}", name, module.status);
                     }
                 }
                 Err(e) => eprintln!("Error during name collection: {}", e),
