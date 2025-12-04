@@ -166,7 +166,7 @@ impl KmodContext {
                 .collect();
 
             match self.modules_hash.insert(
-                module_name,
+                module_name.clone(),
                 KmodModule {
                     status: ModuleStatus::LoadableModule,
                     rel_path: PathBuf::from(module_path_str),
@@ -185,6 +185,12 @@ impl KmodContext {
                 }
                 None => {}
             };
+
+            let module_basename = get_module_basename(module_path_str);
+            if module_basename != module_name {
+                self.alias_map
+                    .insert(module_basename.to_string(), module_name.clone());
+            }
         }
 
         Ok(())
@@ -306,8 +312,6 @@ impl KmodContext {
         Ok(())
     }
 
-    // XXX we don't normalize @name, so e.g. "virtio-rng" won't (unlike
-    // modprobe) find virtio-rng.ko. Could fallback to dup+replace(?)
     pub fn find(&self, name: &str) -> Option<&KmodModule> {
         if let Some(module) = self.modules_hash.get(name) {
             return Some(module);
@@ -988,8 +992,11 @@ mod tests {
             context.find("virtio_rng").unwrap().rel_path,
             Path::new("kernel/drivers/char/hw_random/virtio-rng.ko.zst"),
         );
-        // using the original name with "-" fails
-        assert_eq!(context.find("virtio-rng"), None);
+        // using the original name with "-" should not fail
+        assert_eq!(
+            context.find("virtio-rng").unwrap().rel_path,
+            Path::new("kernel/drivers/char/hw_random/virtio-rng.ko.zst"),
+        );
 
         cleanup_test_dir(&root_path);
     }
