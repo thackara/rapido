@@ -58,9 +58,32 @@ fn read_lines(filename: &Path) -> io::Result<io::Lines<BufReader<File>>> {
     Ok(BufReader::new(file).lines())
 }
 
-// extract: from _path: 'kernel/sub/module.ko{.xz,.zst,.gz}' -> name: 'module'
-fn extract_module_name(path_str: &str) -> String {
-    let path = PathBuf::from(path_str);
+fn normalize_kmod_name(name: &str) -> String {
+    let mut normalized = String::with_capacity(name.len());
+    let mut within_brackets = false;
+
+    for c in name.chars() {
+        match c {
+            '[' => {
+                within_brackets = true;
+                normalized.push(c);
+            }
+            ']' => {
+                within_brackets = false;
+                normalized.push(c);
+            }
+            // dash -> underscore:
+            '-' if !within_brackets => normalized.push('_'),
+            // any other character.
+            _ => normalized.push(c),
+        }
+    }
+
+    normalized
+}
+
+fn get_module_basename(path_str: &str) -> &str {
+    let path = std::path::Path::new(path_str);
     // file_stem: 'kernel/sub/module.ko{.xz,.zst,.gz}' -> file_stem: 'module{.ko}'
     let file_stem = path
         .file_stem()
@@ -68,10 +91,15 @@ fn extract_module_name(path_str: &str) -> String {
         .unwrap_or(path_str);
 
     // file_stem_strip_suffix: 'module{.ko}' -> name: 'module'
-    let base_name = file_stem.strip_suffix(".ko").unwrap_or(file_stem);
+    file_stem.strip_suffix(".ko").unwrap_or(file_stem)
+}
+
+// extract: from _path: 'kernel/sub/module.ko{.xz,.zst,.gz}' -> name: 'module'
+fn extract_module_name(path_str: &str) -> String {
+    let base_name = get_module_basename(path_str);
     // aligns with libkmod: 'kmod_module_get_name' logic.
     // name is always normalized (dashes are replaced with underscores).
-    base_name.replace('-', "_")
+    normalize_kmod_name(base_name)
 }
 
 impl KmodModule {
@@ -392,6 +420,31 @@ mod tests {
             extract_module_name("/lib/modules/x.y.z/drivers/sub1/sub2/sub3/module-name.ko.zst"),
             "module_name"
         );
+        assert_eq!(
+            extract_module_name("drivers/sub/module-name-[a-b]-test.ko.zst"),
+            "module_name_[a-b]_test"
+        );
+    }
+
+    #[test]
+    fn test_normalize_kmod_names() {
+        // test cases from libkmod's
+        // hyphens inside brackets are preserved
+        // hyphens outside brackets are converted
+        let tests = [
+            ("aa-bb-cc_", "aa_bb_cc_"),
+            ("-aa-bb-cc-", "_aa_bb_cc_"),
+            ("-aa[-bb-]cc-", "_aa[-bb-]cc_"),
+            ("-aa-[bb]-cc-", "_aa_[bb]_cc_"),
+            ("-aa-[b-b]-cc-", "_aa_[b-b]_cc_"),
+            ("-aa-b[-]b-cc", "_aa_b[-]b_cc"),
+            ("virtio-rng", "virtio_rng"),
+            ("complex-alias:v*d*", "complex_alias:v*d*"), // handles wildcards
+        ];
+
+        for (input, expected) in tests.iter() {
+            assert_eq!(normalize_kmod_name(input), *expected, "Input: {}", input);
+        }
     }
 
     #[test]
