@@ -135,22 +135,25 @@ impl KmodContext {
                 .map(|p| extract_module_name(p))
                 .collect();
 
-            match self.modules_hash.insert(module_name, KmodModule {
-                status: ModuleStatus::LoadableModule,
-                rel_path: PathBuf::from(module_path_str),
-                hard_deps: dep_names,
-                soft_deps_pre: Vec::new(),
-                soft_deps_post: Vec::new(),
-                weak_deps: Vec::new(),
-            }) {
+            match self.modules_hash.insert(
+                module_name,
+                KmodModule {
+                    status: ModuleStatus::LoadableModule,
+                    rel_path: PathBuf::from(module_path_str),
+                    hard_deps: dep_names,
+                    soft_deps_pre: Vec::new(),
+                    soft_deps_post: Vec::new(),
+                    weak_deps: Vec::new(),
+                },
+            ) {
                 // modules.dep and modules.builtin entries should be unique
-                Some(_) => return Err(
-                            io::Error::new(
-                                io::ErrorKind::InvalidData,
-                                format!("duplicate entry: {:?}", module_path_str)
-                            )
-                ),
-                None => {},
+                Some(_) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("duplicate entry: {:?}", module_path_str),
+                    ))
+                }
+                None => {}
             };
         }
 
@@ -228,22 +231,25 @@ impl KmodContext {
             }
 
             let module_name = extract_module_name(path_str);
-            match self.modules_hash.insert(module_name, KmodModule {
-                status: ModuleStatus::Builtin,
-                rel_path: PathBuf::new(),
-                hard_deps: Vec::new(),
-                soft_deps_pre: Vec::new(),
-                soft_deps_post: Vec::new(),
-                weak_deps: Vec::new(),
-            }) {
+            match self.modules_hash.insert(
+                module_name,
+                KmodModule {
+                    status: ModuleStatus::Builtin,
+                    rel_path: PathBuf::new(),
+                    hard_deps: Vec::new(),
+                    soft_deps_pre: Vec::new(),
+                    soft_deps_post: Vec::new(),
+                    weak_deps: Vec::new(),
+                },
+            ) {
                 // modules.dep and modules.builtin entries should be unique
-                Some(_) => return Err(
-                            io::Error::new(
-                                io::ErrorKind::InvalidData,
-                                format!("duplicate entry: {:?}", path_str)
-                            )
-                ),
-                None => {},
+                Some(_) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("duplicate entry: {:?}", path_str),
+                    ))
+                }
+                None => {}
             };
         }
         Ok(())
@@ -897,7 +903,8 @@ mod tests {
 
         // The returned module should be the actual module, mod32c_intel
         assert_eq!(
-            aliased_mod.name(), "mod32c_intel",
+            aliased_mod.name(),
+            "mod32c_intel",
             "alias lookup should return the real module name"
         );
         assert_eq!(
