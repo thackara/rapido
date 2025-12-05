@@ -1,7 +1,6 @@
 [package]
 name = "rapido"
 description = "Quickly test Linux kernel changes"
-authors = ["David Disseldorp"]
 # The following license covers the src directory, excluding third_party.
 # SPDX-License-Identifier headers are attached to individual source files.
 license = "(GPL-2.0 OR GPL-3.0)"
