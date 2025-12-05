@@ -510,11 +510,11 @@ pub struct ArchiveEnt {
     // add &name[0 .. namesize] slice here, or leave it up to caller?
 }
 
-pub struct ArchiveWalker<R: Seek + BufRead> {
+pub struct ArchiveWalker<R: Seek + Read> {
     reader: R,
 }
 
-pub fn archive_walk<R: Seek + BufRead>(
+pub fn archive_walk<R: Seek + Read>(
     reader: R,
 ) -> io::Result<ArchiveWalker<R>> {
     // kernel extraction skips zeros until header. we don't.
@@ -557,7 +557,7 @@ fn archive_read_newc_md(hdr_md: &[u8]) -> io::Result<(ArchiveMd, u32)> {
     Ok((md, namesize))
 }
 
-impl<R: Seek + BufRead> Iterator for ArchiveWalker<R> {
+impl<R: Seek + Read> Iterator for ArchiveWalker<R> {
     type Item = io::Result<ArchiveEnt>;
     fn next(&mut self) -> Option<Self::Item> {
         let mut hdr_buf = [0u8; NEWC_HDR_LEN as usize];
