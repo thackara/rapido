@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: (GPL-2.0 OR GPL-3.0)
 // Copyright (C) 2025 SUSE LLC
 use std::collections::HashMap;
-use std::env;
 use std::fs;
 use std::hash::{DefaultHasher, Hasher};
 use std::io::{self, BufRead};
@@ -406,10 +405,24 @@ fn vm_start(vm_num: u64, vm_pid_file: &str, initramfs_img: &str, conf: &HashMap<
 }
 
 fn main() -> io::Result<()> {
-    // TODO: don't assume CWD=rapido_dir
-    let cur_dir = env::current_dir()?;
-    let conf = rapido::conf_parse_from_defaults(cur_dir)?;
-    // unwrap: both keys have defaults set prior to conf parsing
+    let conf = match rapido::host_rapido_conf_open(rapido::RAPIDO_CONF_PATH) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            rapido::conf_defaults()
+        },
+        Err(e) => return Err(e),
+        Ok((f, p)) => {
+            let mut conf = rapido::conf_defaults();
+            if let Err(e) = kv_conf::kv_conf_process_append(
+                io::BufReader::new(f),
+                &mut conf
+            ) {
+                eprintln!("failed to process {:?}: {:?}", p, e);
+                return Err(e);
+            }
+            conf
+        },
+    };
+    // unwrap: both keys have defaults set
     let pid_dir = conf.get("QEMU_PID_DIR").unwrap();
     let initramfs_img = conf.get("DRACUT_OUT").unwrap();
 

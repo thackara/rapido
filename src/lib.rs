@@ -1,9 +1,22 @@
 // SPDX-License-Identifier: (GPL-2.0 OR GPL-3.0)
 // Copyright (C) 2025 SUSE LLC
-use std::io;
+use std::env;
 use std::fs;
+use std::io;
 use std::collections::HashMap;
 use std::path::PathBuf;
+
+// ./rapido.conf default path can be overridden by RAPIDO_CONF env var
+pub const RAPIDO_CONF_PATH: &str = "rapido.conf";
+// parameters below may be overridden by rapido.conf...
+// default VM network config path, also used for tap provisioning
+const RAPIDO_NET_CONF_PATH: &str = "net-conf";
+// rapido-cut initramfs output path and rapido-vm QEMU input
+const RAPIDO_DRACUT_OUT: &str = "initrds/myinitrd";
+// default directory to write QEMU pidfiles
+const RAPIDO_QEMU_PID_DIR: &str = "initrds";
+// QEMU defaults: CLI with console redirection. Provide VMs with an RNG device.
+const RAPIDO_QEMU_EXTRA_ARGS: &str = "-nographic -device virtio-rng-pci";
 
 // parse /proc/version string, e.g. Linux version 6.17.0-2-default ...
 fn host_kernel_vers_parse(kvers: &[u8]) -> io::Result<String> {
@@ -64,43 +77,42 @@ pub fn conf_kmod_deps(conf: &HashMap<String, String>, has_net: bool) -> Vec<&str
     deps
 }
 
-// set defaults and then read rapido.conf under @rapido_dir_path
-pub fn conf_parse_from_defaults(
-    mut rapido_dir_path: PathBuf
-) -> io::Result<HashMap<String, String>> {
-    let rapido_dir: &str = match rapido_dir_path.to_str() {
-        None => return Err(io::Error::from(io::ErrorKind::InvalidInput)),
-        Some(s) => s,
-    };
-
-    let mut conf: HashMap<String, String> = HashMap::from([
-        // Dracut initramfs output path and QEMU input
-        ("DRACUT_OUT".to_string(), format!("{}/initrds/myinitrd", rapido_dir)),
-        // default directory to write QEMU pidfiles
-        ("QEMU_PID_DIR".to_string(), format!("{}/initrds", rapido_dir)),
-        // default VM network config path, also used for tap provisioning
-        ("VM_NET_CONF".to_string(), format!("{}/net-conf", rapido_dir)),
-        // QEMU defaults: CLI with console redirection. Provide VMs with an RNG device.
-        ("QEMU_EXTRA_ARGS".to_string(), "-nographic -device virtio-rng-pci".to_string()),
-    ]);
-
-    rapido_dir_path.push("rapido.conf");
-    let f = match fs::File::open(&rapido_dir_path) {
-        Ok(f) => f,
-        Err(e) => {
-            println!("failed to open {:?}: {}", rapido_dir_path, e);
-            return Err(e);
+// return an open file handle and path for rapido.conf, which may
+// be @rapido_conf_path or overridden by RAPIDO_CONF env
+pub fn host_rapido_conf_open(
+    rapido_conf_path: &str,
+) -> io::Result<(fs::File, PathBuf)> {
+    // env file takes precedence
+    match env::var("RAPIDO_CONF") {
+        Ok(c) => {
+            match fs::File::open(&c) {
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                    Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("RAPIDO_CONF missing at {}", c)
+                    ))
+                },
+                Err(e) => Err(e),
+                Ok(f) => Ok((f, PathBuf::from(c))),
+            }
         },
-    };
-    let mut reader = io::BufReader::new(f);
-    match kv_conf::kv_conf_process_append(&mut reader, &mut conf) {
-        Ok(_) => {},
-        Err(e) => {
-            eprintln!("failed to process {:?}: {:?}", rapido_dir_path, e);
-            return Err(e);
+        Err(env::VarError::NotPresent) => {
+            let f = fs::File::open(rapido_conf_path)?;
+            Ok((f, PathBuf::from(rapido_conf_path)))
         },
-    };
-    Ok(conf)
+        Err(env::VarError::NotUnicode(_)) => {
+            Err(io::Error::from(io::ErrorKind::InvalidInput))
+        },
+    }
+}
+
+pub fn conf_defaults() -> HashMap<String, String> {
+    HashMap::from([
+        ("DRACUT_OUT".to_string(), RAPIDO_DRACUT_OUT.to_string()),
+        ("QEMU_PID_DIR".to_string(), RAPIDO_QEMU_PID_DIR.to_string()),
+        ("VM_NET_CONF".to_string(), RAPIDO_NET_CONF_PATH.to_string()),
+        ("QEMU_EXTRA_ARGS".to_string(), RAPIDO_QEMU_EXTRA_ARGS.to_string()),
+    ])
 }
 
 #[cfg(test)]
@@ -110,6 +122,7 @@ mod tests {
 
     struct TempDir {
         pub dir: PathBuf,
+        pub dirname: String,
     }
     impl TempDir {
         // create a random temporary directory under CWD.
@@ -124,7 +137,7 @@ mod tests {
 
             fs::create_dir(&dirname).unwrap();
             eprintln!("created tmp dir: {}", dirname);
-            TempDir { dir: PathBuf::from(dirname) }
+            TempDir { dir: PathBuf::from(&dirname), dirname }
         }
     }
 
@@ -156,11 +169,16 @@ mod tests {
     #[test]
     fn test_conf_parse_from_defaults() {
         let td = TempDir::new();
-        fs::write(td.dir.join("rapido.conf"), b"DRACUT_OUT=thisfile").unwrap();
-        let c = conf_parse_from_defaults(td.dir.clone()).unwrap();
+        let conf_path = format!("{}/rapido.conf", td.dirname);
+        fs::write(&conf_path, b"DRACUT_OUT=thisfile").unwrap();
+        let mut c = conf_defaults();
+        let (f, p) = host_rapido_conf_open(&conf_path).unwrap();
+        kv_conf::kv_conf_process_append(io::BufReader::new(f), &mut c)
+            .expect("failed to process conf");
         // explicitly set by rapido.conf
         assert_eq!(c.get("DRACUT_OUT"), Some("thisfile".to_string()).as_ref());
         // set as default
         assert!(c.get("QEMU_EXTRA_ARGS").unwrap().contains("-nographic"));
+        assert_eq!(p, PathBuf::from(conf_path));
     }
 }

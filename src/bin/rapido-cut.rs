@@ -21,10 +21,6 @@ const BIN_PATHS: [&str; 3] = [ "/usr/bin", "/usr/sbin", "/usr/lib/systemd" ];
 const LIB_PATHS: [&str; 3] = [ "/usr/lib64", "/usr/lib", "/usr/lib64/systemd" ];
 // FIXME: we shouldn't assume rapido-init location
 const RAPIDO_INIT_PATH: &str = "target/release/rapido-init";
-// FIXME: don't assume rapido.conf location, support env var
-const RAPIDO_CONF_PATH: &str = "rapido.conf";
-// FIXME: net-conf should come from rapido.conf or env(?)
-const RAPIDO_NET_CONF_PATH: &str = "net-conf";
 // FIXME: don't assume cwd location
 const RAPIDO_BASH_RC_PATH: &str = "vm_autorun.env";
 
@@ -972,11 +968,6 @@ fn main() -> io::Result<()> {
         data: GatherData {
             items: vec!(
                 GatherItem {
-                    src: PathBuf::from(RAPIDO_CONF_PATH),
-                    dst: PathBuf::from("/rapido.conf"),
-                    flags: GATHER_ITEM_IGNORE_PARENT,
-                },
-                GatherItem {
                     src: PathBuf::from(RAPIDO_BASH_RC_PATH),
                     dst: PathBuf::from("/rapido.rc"),
                     flags: GATHER_ITEM_IGNORE_PARENT,
@@ -988,11 +979,40 @@ fn main() -> io::Result<()> {
         autoruns: 0,
     };
 
-    // TODO: don't assume CWD=rapido_dir
-    let cur_dir = env::current_dir()?;
-    let conf = rapido::conf_parse_from_defaults(cur_dir)?;
+    let conf = match rapido::host_rapido_conf_open(rapido::RAPIDO_CONF_PATH) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            eprintln!("no rapido.conf, using defaults");
+            rapido::conf_defaults()
+            // TODO: archive empty rapido.conf?
+        },
+        Err(e) => {
+            eprintln!("failed to open rapido.conf: {:?}", e);
+            return Err(e);
+        },
+        Ok((f, p)) => {
+            let mut conf = rapido::conf_defaults();
+            if let Err(e) = kv_conf::kv_conf_process_append(
+                io::BufReader::new(f),
+                &mut conf
+            ) {
+                eprintln!("failed to process {:?}: {:?}", p, e);
+                return Err(e);
+            }
+
+            // TODO: immediately archive rapido.conf while still open here?
+            state.data.items.push(
+                GatherItem {
+                    src: p,
+                    dst: PathBuf::from("/rapido.conf"),
+                    flags: GATHER_ITEM_IGNORE_PARENT,
+                }
+            );
+            conf
+        },
+    };
+
     let cpio_out_path = match args_process(
-        // unwrap: DRACUT_OUT default set prior to conf parsing
+        // unwrap: DRACUT_OUT set in conf_defaults()
         conf.get("DRACUT_OUT").unwrap(),
         &mut state
     ) {
@@ -1009,7 +1029,8 @@ fn main() -> io::Result<()> {
     );
     if state.net_enabled {
         state.data.items.push(GatherItem {
-            src: PathBuf::from(RAPIDO_NET_CONF_PATH),
+            // unwrap: VM_NET_CONF set in conf_defaults()
+            src: PathBuf::from(conf.get("VM_NET_CONF").unwrap()),
             dst: PathBuf::from("/rapido-rsc/net"),
             flags: 0,
         });
