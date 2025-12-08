@@ -19,7 +19,7 @@
 # directory if unset.
 ./target/release/rapido-cut \
 	--autorun "autorun/simple_example.sh $*" \
-	--install "resize ls sleep ps rmdir dd mkfs.xfs" \
+	--install "resize ls cat sleep ps rmdir dd mkfs.xfs" \
 	--install-kmod "zram lzo lzo_rle"
 
 # rapido-cut writes the initramfs image to the rapido.conf DRACUT_OUT specified
