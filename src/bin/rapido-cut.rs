@@ -1055,14 +1055,19 @@ fn main() -> io::Result<()> {
     };
     let mut cpio_state = cpio::ArchiveState::new(&cpio_props);
 
-    let cpio_f = fs::OpenOptions::new()
+    let mut cpio_writer = match fs::OpenOptions::new()
         .read(false)
         .write(true)
         .create(true)
         // for rapido we normally want to truncate any existing output file
         .truncate(true)
-        .open(&cpio_out_path)?;
-    let mut cpio_writer = io::BufWriter::new(cpio_f);
+        .open(&cpio_out_path) {
+        Err(e) => {
+            eprintln!("failed to open output at {:?}: {}", cpio_out_path, e);
+            return Err(e);
+        },
+        Ok(f) => io::BufWriter::new(f),
+    };
 
     // @libs_seen is an optimization to avoid resolving already-seen elf deps.
     let mut libs_seen: HashSet<String> = HashSet::new();
