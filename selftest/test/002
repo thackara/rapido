@@ -8,17 +8,7 @@ set timeout 60
 spawn ./rapido cut -B simple-example
 expect {
 	timeout {exit 1}
-	"*** Creating initramfs image file"
-}
-expect {
-	timeout {exit 1}
-	eof
-}
-# confirm that image was written at DRACUT_OUT path
-spawn lsinitrd $::env(RAPIDO_SELFTEST_TMPDIR)/myinitrd
-expect {
-	timeout {exit 1}
-	"Version: dracut"
+	"myinitrd written"
 }
 expect {
 	timeout {exit 1}
