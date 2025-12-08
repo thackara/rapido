@@ -162,8 +162,8 @@ fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs> {
 
     //let (kconfig: String, krel: Option<&str>) = match conf.get("KERNEL_SRC") {
     let (kconfig, krel) = match conf.get("KERNEL_SRC") {
-        Some(ks) => (format!("{ks}/.config"), None),
-        None => match conf.get("KERNEL_RELEASE") {
+        Some(ks) if !ks.is_empty() => (format!("{ks}/.config"), None),
+        None | Some(_) => match conf.get("KERNEL_RELEASE") {
             Some(rel) => (format!("/boot/config-{rel}"), Some(rel.clone())),
             None => {
                 let rel = host_kernel_vers()?;
@@ -186,9 +186,9 @@ fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs> {
         if line == "CONFIG_X86_64=y" {
             qemu_args = Some(QemuArgs{
                 kernel_img: match ksrc {
-                    Some(ks) => format!("{ks}/arch/x86/boot/bzImage"),
+                    Some(ks) if !ks.is_empty() => format!("{ks}/arch/x86/boot/bzImage"),
                     // krel always set without KERNEL_SRC
-                    None => format!("/boot/vmlinuz-{}", krel.unwrap()),
+                    None | Some(_) => format!("/boot/vmlinuz-{}", krel.unwrap()),
                 },
                 qemu_bin: "qemu-system-x86_64",
                 console: "ttyS0",

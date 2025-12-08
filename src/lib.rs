@@ -42,7 +42,7 @@ pub fn conf_src_or_host_kernel_vers(
     conf: &HashMap<String, String>
 ) -> io::Result<String> {
     match conf.get("KERNEL_SRC") {
-        Some(ksrc) => {
+        Some(ksrc) if !ksrc.is_empty() => {
             let b = fs::read(format!("{ksrc}/include/config/kernel.release"))?;
             let btrimmed = match b.strip_suffix(&[b'\n']) {
                 Some(bt) => bt,
@@ -50,7 +50,7 @@ pub fn conf_src_or_host_kernel_vers(
             };
             Ok(String::from_utf8_lossy(btrimmed).to_string())
         },
-        None => match conf.get("KERNEL_RELEASE") {
+        None | Some(_) => match conf.get("KERNEL_RELEASE") {
             Some(krel) => Ok(krel.clone()),
             None => host_kernel_vers(),
         },

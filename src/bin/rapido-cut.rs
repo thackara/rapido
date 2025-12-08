@@ -603,9 +603,9 @@ fn gather_archive_kmods<W: Seek + Write>(
     let kmod_dst_root = PathBuf::from("/usr/lib/modules/").join(&krel);
     let kmod_src_root = match conf.get("KERNEL_INSTALL_MOD_PATH") {
         // should assert that KERNEL_SRC is set?
-        Some(kmp) => PathBuf::from(kmp).join(format!("lib/modules/{krel}")),
-        None if kmod_dst_root.exists() => kmod_dst_root.clone(),
-        None => {
+        Some(kmp) if !kmp.is_empty() => PathBuf::from(kmp).join(format!("lib/modules/{krel}")),
+        None | Some(_) if kmod_dst_root.exists() => kmod_dst_root.clone(),
+        None | Some(_) => {
             // assume that we have a non-Tumbleweed system
             PathBuf::from("/lib/modules/").join(&krel)
         },
