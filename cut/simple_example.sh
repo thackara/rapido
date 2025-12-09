@@ -1,6 +1,6 @@
 #!/bin/bash
 # SPDX-License-Identifier: (LGPL-2.1 OR LGPL-3.0)
-# Copyright (C) SUSE SA 2018-2025, all rights reserved.
+# Copyright (C) SUSE S.A. 2018-2025, all rights reserved.
 
 # The job of Rapido cut scripts is to generate a VM image. This is done using
 # rapido-cut with a number of parameters...
@@ -17,7 +17,8 @@
 # --install-kmod provides a list of kernel modules, which will be obtained from
 # the rapido.conf KERNEL_INSTALL_MOD_PATH directory, or host kernel modules
 # directory if unset.
-./target/release/rapido-cut \
+PATH="target/release:${PATH}"
+rapido-cut \
 	--autorun "autorun/simple_example.sh $*" \
 	--install "resize ls cat sleep ps rmdir dd mkfs.xfs" \
 	--install-kmod "zram lzo lzo_rle"

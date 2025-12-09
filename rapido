@@ -27,8 +27,8 @@ rapido_vm()
 short_help["boot"]="Boot previously prepared test"
 rapido_boot()
 {
-	"${RAPIDO_DIR}/target/release/rapido-vm"
-	# check whether src is newer than bin?
+	PATH="target/release:${PATH}"
+	rapido-vm
 }
 
 cut_usage()
