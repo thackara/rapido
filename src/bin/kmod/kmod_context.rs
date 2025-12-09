@@ -276,19 +276,21 @@ impl KmodContext {
         Ok(())
     }
 
-    // XXX we don't normalize @name, so e.g. "virtio-rng" won't (unlike
-    // modprobe) find virtio-rng.ko. Could fallback to dup+replace(?)
     pub fn find(&self, name: &str) -> Option<&KmodModule> {
         if let Some(module) = self.modules_hash.get(name) {
             return Some(module);
         }
 
-        // alias map (1-1)
-
         if let Some(actual_name) = self.alias_map.get(name) {
             if let Some(module) = self.modules_hash.get(actual_name) {
                 return Some(module);
             }
+        }
+
+        // fallback once in case caller requested non-normalized name
+        let normname = name.replace('-', "_");
+        if normname != name {
+            return self.find(&normname);
         }
 
         None
@@ -928,13 +930,15 @@ mod tests {
             "Resolved module path is incorrect"
         );
 
-        // find() requires the replace(-,_) name
+        // find() performs normalization, so handles either - or _ form
         assert_eq!(
             context.find("virtio_rng").unwrap().rel_path,
             "kernel/drivers/char/hw_random/virtio-rng.ko.zst",
         );
-        // using the original name with "-" fails
-        assert_eq!(context.find("virtio-rng"), None);
+        assert_eq!(
+            context.find("virtio-rng").unwrap().rel_path,
+            "kernel/drivers/char/hw_random/virtio-rng.ko.zst",
+        );
 
         cleanup_test_dir(&root_path);
     }
