@@ -950,6 +950,29 @@ fn args_process(out_def: &str, state: &mut CutState) -> argument::Result<PathBuf
     Ok(cpio_output)
 }
 
+// rapido-rcf-config-start
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RapidoConfig {
+    pub autorun_script: Option<String>,
+    pub output_path: Option<String>,
+    pub resource_memory: Option<String>,
+    pub resource_cpus: Option<u32>,
+    pub networking_enabled: bool,
+    pub install_bins: Vec<String>,
+    pub install_kmods: Vec<String>,
+    pub install_source_paths: Vec<String>,
+    pub include_data: Vec<IncludeItem>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct IncludeItem {
+    pub source: String,
+    pub destination: String,
+}
+
+include!(concat!(env!("OUT_DIR"), "/config_embedded.rs"));
+// rapido-rcf-config-end
+
 fn main() -> io::Result<()> {
     let mut state = CutState {
         bins: Gather {
@@ -983,6 +1006,29 @@ fn main() -> io::Result<()> {
         },
         net_enabled: false,
         autoruns: 0,
+    };
+    // let exe_path = std::env::current_exe()?;
+    // let exe_name = exe_path.file_stem().unwrap().to_string_lossy();
+    let invocation_name = std::env::args().next().unwrap_or_else(|| "rapido-cut".to_string());
+    let exe_name = Path::new(&invocation_name)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "rapido-cut".to_string());
+
+    if exe_name == "rapido-cut" {
+        eprintln!("Running in default 'rapido-cut' CLI mode.");
+    } else {
+        let bundle_name = exe_name.to_string();
+        eprintln!("Running in embedded bundle mode: '{}'", bundle_name);
+
+        let rcf_config = load_embedded_bundle_config(&bundle_name);
+        state.kmods.extend(rcf_config.install_kmods);
+        state.net_enabled = rcf_config.networking_enabled;
+        state.bins.names.extend(
+            rcf_config.install_bins.into_iter().map(|s| (s, None))
+        );
+        // auto_run push
+        // include_data push
     };
 
     let conf = match rapido::host_rapido_conf_open(rapido::RAPIDO_CONF_PATH) {
