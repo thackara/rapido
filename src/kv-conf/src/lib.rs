@@ -463,4 +463,17 @@ mod tests {
             ])
         );
     }
+
+    // check that a variable without braces fails with line number in Err
+    #[test]
+    fn test_err_line() {
+        let c = io::Cursor::new("k=val\nnextk=123\nfink=a$k");
+        let e = kv_conf_process(c).expect_err("variable without braces passed");
+        // we probably shouldn't rely on error fmt output stability
+        let estr = format!("{:?}", e);
+        assert_eq!(
+            estr,
+            "Custom { kind: InvalidInput, error: \"line 3: Some(\\\"variables must be wrapped in {} braces\\\")\" }"
+        );
+    }
 }
