@@ -201,10 +201,9 @@ pub fn kv_conf_process_append<R: io::BufRead>(mut rdr: R, map: &mut HashMap<Stri
 
         match kv_process(&mut buffer, map) {
             Err(e) => {
-                let msg = if e.get_ref().is_some() {
-                    format!("line {}: {:?}", linenum, e.get_ref())
-                } else {
-                    format!("error on line {}", linenum)
+                let msg = match e.get_ref() {
+                    Some(eref) => format!("line {}: {:?}", linenum, eref),
+                    None => format!("error on line {}", linenum),
                 };
                 return Err(io::Error::new(e.kind(), msg));
             },
@@ -470,10 +469,9 @@ mod tests {
         let c = io::Cursor::new("k=val\nnextk=123\nfink=a$k");
         let e = kv_conf_process(c).expect_err("variable without braces passed");
         // we probably shouldn't rely on error fmt output stability
-        let estr = format!("{:?}", e);
         assert_eq!(
-            estr,
-            "Custom { kind: InvalidInput, error: \"line 3: Some(\\\"variables must be wrapped in {} braces\\\")\" }"
+            format!("{:?}", e),
+            "Custom { kind: InvalidInput, error: \"line 3: \\\"variables must be wrapped in {} braces\\\"\" }"
         );
     }
 }
