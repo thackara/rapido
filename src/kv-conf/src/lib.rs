@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: (GPL-2.0 OR GPL-3.0)
 // Copyright (C) 2025 SUSE LLC
-use std::io;
 use std::collections::HashMap;
+use std::io;
 
 const CONF_LINE_MAX: usize = 1024 * 100;
 
@@ -11,20 +11,28 @@ fn kv_var_sub(block: &str, map: &HashMap<String, String>) -> io::Result<String> 
     // only support {} wrapped variables that we've already encountered
     let mut varblock = block.split_inclusive(&['{', '}']);
     if varblock.next() != Some("{") {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput,
-                "variables must be wrapped in {} braces"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "variables must be wrapped in {} braces",
+        ));
     }
     let var = varblock.next();
     if var.is_none() || !var.unwrap().ends_with("}") {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput,
-                "no closing brace for variable"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "no closing brace for variable",
+        ));
     }
     let key = var.unwrap().strip_suffix("}").unwrap();
 
     let subbed = match map.get(key) {
         Some(val) => val.clone(),
-        None => return Err(io::Error::new(io::ErrorKind::InvalidInput,
-                "invalid variable substitution: not seen")),
+        None => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid variable substitution: not seen",
+            ))
+        }
     };
     //println!("subbed for {}: {}", key, subbed);
     // need to retain anything that comes after the var-closing '}'
@@ -47,7 +55,7 @@ fn kv_process(line: &str, map: &mut HashMap<String, String>) -> io::Result<Optio
     let (key, val) = match line.split_once('=') {
         None => {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "missing ="));
-        },
+        }
         Some((k, v)) => (k.trim_start(), v),
     };
 
@@ -85,22 +93,27 @@ fn kv_process(line: &str, map: &mut HashMap<String, String>) -> io::Result<Optio
             unquoted_val.push_str(quoteblock);
 
             if quoteblock.len() != 1 {
-                return Err(io::Error::new(io::ErrorKind::InvalidInput,
-                    "expected escaped char at split boundary"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "expected escaped char at split boundary",
+                ));
             }
             continue;
         }
 
         // comment after unquoted space is valid, otherwise invalid
         if comment_next {
-            assert!(inquote == Quoted::No);  // should only get here outside of quotes
+            assert!(inquote == Quoted::No); // should only get here outside of quotes
             if quoteblock.starts_with("#") {
                 // comment
                 break;
             } else if quoteblock.trim_start() == "" {
                 continue;
             } else {
-                return Err(io::Error::new(io::ErrorKind::InvalidInput, "unexpected whitespace"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "unexpected whitespace",
+                ));
             }
         }
 
@@ -123,7 +136,7 @@ fn kv_process(line: &str, map: &mut HashMap<String, String>) -> io::Result<Optio
                 Quoted::Single => {
                     strip_sfx = "";
                     Quoted::Single
-                },
+                }
             };
             unquoted_val.push_str(quoteblock.strip_suffix(strip_sfx).unwrap());
         } else if quoteblock.ends_with("\'") {
@@ -134,7 +147,7 @@ fn kv_process(line: &str, map: &mut HashMap<String, String>) -> io::Result<Optio
                 Quoted::Double => {
                     strip_sfx = "";
                     Quoted::Double
-                },
+                }
             };
             unquoted_val.push_str(quoteblock.strip_suffix(strip_sfx).unwrap());
         } else if quoteblock.ends_with(&[' ', '\t']) && inquote == Quoted::No {
@@ -182,7 +195,10 @@ fn kv_process(line: &str, map: &mut HashMap<String, String>) -> io::Result<Optio
 //     let mut map: HashMap<String, String> = HashMap::new();
 //     let _res = kv_conf_process_append(io::BufReader::new(f), &mut map);
 // }
-pub fn kv_conf_process_append<R: io::BufRead>(mut rdr: R, map: &mut HashMap<String, String>) -> io::Result<()> {
+pub fn kv_conf_process_append<R: io::BufRead>(
+    mut rdr: R,
+    map: &mut HashMap<String, String>,
+) -> io::Result<()> {
     let mut buffer = String::new();
 
     for linenum in 1.. {
@@ -191,12 +207,12 @@ pub fn kv_conf_process_append<R: io::BufRead>(mut rdr: R, map: &mut HashMap<Stri
             Ok(n) if n == 0 => {
                 // EOF
                 break;
-            },
+            }
             Ok(n) if n > CONF_LINE_MAX => {
                 let msg = format!("line {} too long", linenum);
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, msg));
-            },
-            Ok(_) => {},
+            }
+            Ok(_) => {}
         };
 
         match kv_process(&mut buffer, map) {
@@ -206,7 +222,7 @@ pub fn kv_conf_process_append<R: io::BufRead>(mut rdr: R, map: &mut HashMap<Stri
                     None => format!("error on line {}", linenum),
                 };
                 return Err(io::Error::new(e.kind(), msg));
-            },
+            }
             // remainder may contain multi-line string
             Ok(remainder) if remainder.is_some() => buffer = remainder.unwrap(),
             Ok(_) => buffer.clear(),
@@ -235,61 +251,84 @@ mod tests {
     #[test]
     fn test_simple() {
         let c = io::Cursor::new("key=val");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "val".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "val".to_string())])
+        );
     }
 
     #[test]
     fn test_quoted() {
         let c = io::Cursor::new("key=\"val\"");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "val".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "val".to_string())])
+        );
 
         let c = io::Cursor::new("key=\"val spaced\"");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "val spaced".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "val spaced".to_string())])
+        );
 
         let c = io::Cursor::new("key=\'val spaced\'");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "val spaced".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "val spaced".to_string())])
+        );
 
         // XXX intentional bash divergence: don't turn quoted tabs into spaces
         let c = io::Cursor::new("key=\'val\ttabbed\'");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "val\ttabbed".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "val\ttabbed".to_string())])
+        );
 
         let c = io::Cursor::new("key=\'qu\"ot\"ed\'");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "qu\"ot\"ed".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "qu\"ot\"ed".to_string())])
+        );
 
         let c = io::Cursor::new("key=\"qu\'oted\"");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "qu\'oted".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "qu\'oted".to_string())])
+        );
     }
 
     #[test]
     fn test_comments() {
         let c = io::Cursor::new("# this is a comment\nkey=val\n #key=newval");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "val".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "val".to_string())])
+        );
 
         let c = io::Cursor::new("key=val # this is a trailing comment");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "val".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "val".to_string())])
+        );
 
         let c = io::Cursor::new("key=val  # this is a trailing comment ");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "val".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "val".to_string())])
+        );
 
         let c = io::Cursor::new("key=val\t\t# this is a trailing comment ");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "val".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "val".to_string())])
+        );
     }
 
     #[test]
     fn test_multiple() {
         let c = io::Cursor::new("key=val\nnextkey=nextval");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
             HashMap::from([
                 ("key".to_string(), "val".to_string()),
                 ("nextkey".to_string(), "nextval".to_string()),
@@ -300,14 +339,17 @@ mod tests {
     #[test]
     fn test_overwrite() {
         let c = io::Cursor::new("key=val\nkey=newval");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "newval".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "newval".to_string())])
+        );
     }
 
     #[test]
     fn test_var() {
         let c = io::Cursor::new("k=val\nnextk=${k}");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
             HashMap::from([
                 ("k".to_string(), "val".to_string()),
                 ("nextk".to_string(), "val".to_string()),
@@ -315,7 +357,8 @@ mod tests {
         );
 
         let c = io::Cursor::new("k=val\nnextk=abc${k}def");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
             HashMap::from([
                 ("k".to_string(), "val".to_string()),
                 ("nextk".to_string(), "abcvaldef".to_string()),
@@ -323,7 +366,8 @@ mod tests {
         );
 
         let c = io::Cursor::new("k=val\nnextk=abc\"${k}\"def");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
             HashMap::from([
                 ("k".to_string(), "val".to_string()),
                 ("nextk".to_string(), "abcvaldef".to_string()),
@@ -331,7 +375,8 @@ mod tests {
         );
 
         let c = io::Cursor::new("k=val\nnextk=123\nfink=a${k}b${nextk}c");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
             HashMap::from([
                 ("k".to_string(), "val".to_string()),
                 ("nextk".to_string(), "123".to_string()),
@@ -340,7 +385,8 @@ mod tests {
         );
 
         let c = io::Cursor::new("k=val\nnextk=abc\'${k}\'def");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
             HashMap::from([
                 ("k".to_string(), "val".to_string()),
                 ("nextk".to_string(), "abc${k}def".to_string()),
@@ -351,46 +397,66 @@ mod tests {
     #[test]
     fn test_escaped() {
         let c = io::Cursor::new("key=val\\ spaced");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "val spaced".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "val spaced".to_string())])
+        );
         let c = io::Cursor::new("key=val\\ #spaced\t");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "val #spaced".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "val #spaced".to_string())])
+        );
         let c = io::Cursor::new("key=val\\\ttabbed     ");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "val\ttabbed".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "val\ttabbed".to_string())])
+        );
 
         let c = io::Cursor::new("key=val\\\\");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "val\\".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "val\\".to_string())])
+        );
     }
 
     #[test]
     fn test_multiline_kv() {
         // multiline only works with quoting, with or without trailing \
         let c = io::Cursor::new("key=\"line1 \\\nline2\"");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "line1 line2".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "line1 line2".to_string())])
+        );
 
         let c = io::Cursor::new("key=\"line1   \nline2\"");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "line1 line2".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "line1 line2".to_string())])
+        );
 
         let c = io::Cursor::new("key=\"line1\\\nline2\"");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "line1line2".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "line1line2".to_string())])
+        );
 
         let c = io::Cursor::new("key=\'line1\\\nline2\'");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "line1\\ line2".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "line1\\ line2".to_string())])
+        );
 
         let c = io::Cursor::new("key=\'line1\\  \nline2\'");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "line1\\ line2".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "line1\\ line2".to_string())])
+        );
 
         let c = io::Cursor::new("key=\"line1\nline2\"");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "line1 line2".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "line1 line2".to_string())])
+        );
     }
 
     #[test]
@@ -414,16 +480,22 @@ mod tests {
     #[test]
     fn test_empty() {
         let c = io::Cursor::new("key=");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("key".to_string(), "".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("key".to_string(), "".to_string())])
+        );
 
         let c = io::Cursor::new("");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([])
+        );
 
         let c = io::Cursor::new("\n\n# comment");
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([])
+        );
 
         let c = io::Cursor::new("=");
         assert!(kv_conf_process(c).is_err());
@@ -435,8 +507,10 @@ mod tests {
         vec.resize(CONF_LINE_MAX - 1, b'#');
         vec.extend_from_slice(&[b'\n']);
         let c = io::Cursor::new(&vec);
-        assert_eq!(kv_conf_process(c).expect("kv_conf_process failed"),
-            HashMap::from([ ("k".to_string(), "v".to_string()) ]));
+        assert_eq!(
+            kv_conf_process(c).expect("kv_conf_process failed"),
+            HashMap::from([("k".to_string(), "v".to_string())])
+        );
 
         vec.truncate(CONF_LINE_MAX - 1);
         vec.resize(CONF_LINE_MAX + 1, b'#');
@@ -448,13 +522,13 @@ mod tests {
     fn test_append() {
         let c = io::Cursor::new("key=");
         let mut map = kv_conf_process(c).expect("kv_conf_process failed");
-        assert_eq!(map,
-            HashMap::from([ ("key".to_string(), "".to_string()) ]));
+        assert_eq!(map, HashMap::from([("key".to_string(), "".to_string())]));
 
         map.insert("extra".to_string(), "val".to_string());
         let c = io::Cursor::new("key=overwritten\nnextkey=stuff${extra}");
         kv_conf_process_append(c, &mut map).expect("kv_conf_process_append failed");
-        assert_eq!(map,
+        assert_eq!(
+            map,
             HashMap::from([
                 ("key".to_string(), "overwritten".to_string()),
                 ("extra".to_string(), "val".to_string()),
