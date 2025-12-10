@@ -781,6 +781,12 @@ fn populate_default_symlinks<W: Seek + Write>(
         let tgt = Path::new("usr/lib64");
         cpio::archive_symlink(cpio_state, p, &amd, tgt, &mut cpio_writer)?;
     }
+    // xfstests (and others) hardcode /bin/bash
+    let p = Path::new("/bin");
+    if !paths_seen.contains(p) {
+        let tgt = Path::new("usr/bin");
+        cpio::archive_symlink(cpio_state, p, &amd, tgt, &mut cpio_writer)?;
+    }
     Ok(())
 }
 
