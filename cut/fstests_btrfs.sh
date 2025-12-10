@@ -37,6 +37,6 @@ rapido-cut \
 		   fsverity keyctl openssl /etc/ssl/openssl.cnf \
 		   swapon swapoff xfs_freeze fsck ${req_inst[*]}" \
 	--include "$FSTESTS_SRC $FSTESTS_SRC" \
-	--install-kmod "zram lzo lzo-rle dm-snapshot dm-flakey btrfs raid6_pq \
-			loop scsi_debug dm-log-writes xxhash_generic ext4 \
+	--install-kmod "zram lzo lzo_rle dm_snapshot dm_flakey btrfs raid6_pq \
+			loop scsi_debug dm_log_writes xxhash_generic ext4 \
 			virtio_blk"
