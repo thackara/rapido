@@ -319,9 +319,16 @@ fn gather_archive_dirs<W: Seek + Write>(
     for comp in p.components() {
         match comp {
             Component::RootDir => continue,
-            Component::CurDir | Component::ParentDir => {
-                // FIXME: absolute() does leave ParentDir components!
-                panic!("got CurDir or ParentDir after canonicalization");
+            // collapse (skip) any "./" components
+            Component::CurDir => continue,
+            // absolute() can leave ParentDir components to handle
+            Component::ParentDir => {
+                if here.pop() == false {
+                    eprintln!("invalid ParentDir component in: {:?}", &p);
+                    return Err(io::Error::from(io::ErrorKind::InvalidInput));
+                }
+                // keep walking with @here now at parent
+                continue;
             },
             Component::Prefix(_) => {
                 eprintln!("non-Unix path prefixes not supported");
