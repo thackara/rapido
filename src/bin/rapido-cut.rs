@@ -2262,4 +2262,66 @@ mod tests {
             )
         )
     }
+
+    #[test]
+    fn test_manifest_file_parent_collapse() {
+        let conf = rapido::conf_defaults();
+        let td = TempDir::new();
+        let data = b"this is some data";
+        let file = format!("{}/test.data", td.dirname);
+        fs::write(&file, &data).unwrap();
+        let fest = format!("{}/test.fest", td.dirname);
+        fs::write(&fest, format!("file /a/b/.././b/../b/c {}", file)).unwrap();
+
+        let props = cpio::ArchiveProperties{
+            data_align: 4096,
+            ..cpio::ArchiveProperties::default()
+        };
+        let mut cpio_state = cpio::ArchiveState::new(props);
+        let mut cpio_out = io::Cursor::new(Vec::new());
+
+        let rdr = io::BufReader::new(
+            fs::OpenOptions::new().read(true).open(&fest).unwrap()
+        );
+        test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr)
+            .expect("bad manifest");
+
+        cpio_out.seek(io::SeekFrom::Start(0)).unwrap();
+        let mut aw = cpio::archive_walk(cpio_out).unwrap();
+        let ae = aw.next().unwrap().unwrap();
+        // parent dirs are automatically added
+        assert_eq!(ae.name_str(), "a");
+        assert_eq!(ae.md.mode & cpio::S_IFMT, cpio::S_IFDIR);
+        let ae = aw.next().unwrap().unwrap();
+        assert_eq!(ae.name_str(), "a/b");
+        assert_eq!(ae.md.mode & cpio::S_IFMT, cpio::S_IFDIR);
+        let ae = aw.next().unwrap().unwrap();
+        // XXX: currently we only collapse parent dirs. Kernel should handle
+        // this fine, but I should add initramfs_test.c coverage.
+        assert_eq!(ae.name_str(), "a/b/../b/../b/c");
+        assert_eq!(ae.md.mode & cpio::S_IFMT, cpio::S_IFREG);
+        assert_eq!(ae.md.len, data.len() as u32);
+    }
+
+    #[test]
+    fn test_manifest_file_parent_collapse_below_root() {
+        let conf = rapido::conf_defaults();
+        let td = TempDir::new();
+        let fest = format!("{}/test.fest", td.dirname);
+        fs::write(&fest, format!("file /a/b/.././../../below")).unwrap();
+
+        let props = cpio::ArchiveProperties{
+            data_align: 4096,
+            ..cpio::ArchiveProperties::default()
+        };
+        let mut cpio_state = cpio::ArchiveState::new(props);
+        let mut cpio_out = io::Cursor::new(Vec::new());
+
+        let rdr = io::BufReader::new(
+            fs::OpenOptions::new().read(true).open(&fest).unwrap()
+        );
+        let e = test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr);
+        assert_eq!(e.is_err(), true);
+        assert_eq!(e.unwrap_err().kind(), io::ErrorKind::InvalidInput);
+    }
 }
