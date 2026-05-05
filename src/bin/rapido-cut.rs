@@ -1351,21 +1351,25 @@ fn manifest_autorun<W: Seek + Write>(
             n.to_str().unwrap()
         )),
     };
-    *autorun_idx += 1;
+
+    // only a single parent, so avoid gather_archive_dirs()
+    if *autorun_idx == 0 {
+        let p = PathBuf::from("/rapido_autorun");
+        let parent_amd = cpio::ArchiveMd {
+            mode: cpio::S_IFDIR | 0o755,
+            ..CPIO_AMD_DEFAULT
+        };
+        cpio::archive_path(cpio_state, &p, &parent_amd, &mut cpio_writer)?;
+        paths_seen.insert(p);
+    }
 
     let f = fs::File::open(src)?;
     let src_md = f.metadata()?;
     let src_amd = cpio::ArchiveMd::from(cpio_state, &src_md)?;
+    cpio::archive_file(cpio_state, &dst, &src_amd, &f, &mut cpio_writer)?;
+    *autorun_idx += 1;
 
-    gather_archive_dirs(
-        // TODO: could shortcut for single /rapido_autorun
-        dst.parent(),
-        &src_amd,
-        paths_seen,
-        cpio_state,
-        &mut cpio_writer
-    )?;
-    cpio::archive_file(cpio_state, &dst, &src_amd, &f, &mut cpio_writer)
+    Ok(())
 }
 
 fn manifest_tree<W: Seek + Write>(
@@ -2079,15 +2083,18 @@ mod tests {
         // archive should carry:
         // + parent directories
         // + autorun files, prefixed with an incrementing index
+        let mut got_dirs: HashSet<OsString> = HashSet::new();
         let mut got_files: HashSet<OsString> = HashSet::new();
 
         while let Some(ae) = aw.next() {
             assert!(ae.is_ok());
             let ae = ae.unwrap();
             let an = ae.name_str();
-            if ae.md.mode & cpio::S_IFMT == cpio::S_IFREG {
-                let p = Path::new(an).file_name().unwrap().to_os_string();
-                assert!(got_files.insert(p));
+            let p = Path::new(an).file_name().unwrap().to_os_string();
+            match ae.md.mode & cpio::S_IFMT {
+                cpio::S_IFREG => assert!(got_files.insert(p)),
+                cpio::S_IFDIR => assert!(got_dirs.insert(p)),
+                _ => panic!("unexpected archive entry"),
             }
         }
         assert_eq!(
@@ -2097,7 +2104,14 @@ mod tests {
                 OsString::from("001-inc_autorun.sh"),
                 OsString::from("002-last_autorun.sh"),
             ])
-        )
+        );
+        assert_eq!(
+            got_dirs,
+            HashSet::from([
+                OsString::from("rapido_autorun"),
+                OsString::from("baseafter"),
+            ])
+        );
     }
 
     #[test]
