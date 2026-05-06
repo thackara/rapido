@@ -58,7 +58,7 @@ jobs:
       - name: clone and build mainline kernel
         run: |
           git clone --depth 1 -b master https://github.com/torvalds/linux ${HOME}/linux
-          cp kernel/fstests_btrfs_zram.defconfig ${HOME}/linux/.config
+          cp kernel/selftest.defconfig ${HOME}/linux/.config
           pushd ${HOME}/linux
           make olddefconfig
           make -j$(nproc)
