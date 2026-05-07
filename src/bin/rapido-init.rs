@@ -70,6 +70,7 @@ struct KcliArgs<'a> {
     rapido_hostname: Option<&'a str>,
     rapido_vm_num: Option<&'a str>,
     rapido_tap_mac: Option<HashMap<&'a str, &'a str>>,
+    stty_rc: Option<&'a str>,
     systemd_machine_id: Option<&'a str>,
     console: Option<&'a str>,
 }
@@ -79,6 +80,7 @@ fn kcli_parse(kcmdline: &[u8]) -> io::Result<KcliArgs<'_>> {
         rapido_hostname: None,
         rapido_vm_num: None,
         rapido_tap_mac: None,
+        stty_rc: None,
         systemd_machine_id: None,
         console: None,
     };
@@ -136,19 +138,19 @@ fn kcli_parse(kcmdline: &[u8]) -> io::Result<KcliArgs<'_>> {
             // rapido.stty=<rows>,<cols>
             [b'r', b'a', b'p', b'i', b'd', b'o', b'.',
             b's', b't', b't', b'y', b'=', rows_cols @ ..] => {
-                let (rows, cols) = match str::from_utf8(rows_cols) {
+                args.stty_rc = match str::from_utf8(rows_cols) {
                     Err(_) => Err(io::Error::from(io::ErrorKind::InvalidData)),
                     Ok(rs_cs) => match rs_cs.split_once(',') {
                         None => Err(io::Error::from(io::ErrorKind::InvalidData)),
-                        Some((r, c)) => Ok((r, c)),
+                        Some((r, c)) => {
+                            if r.parse::<u32>().is_err() || c.parse::<u32>().is_err() {
+                                Err(io::Error::from(io::ErrorKind::InvalidData))
+                            } else {
+                                Ok(Some(rs_cs))
+                            }
+                        },
                     }
                 }?;
-                if rows.parse::<u32>().is_err() || cols.parse::<u32>().is_err() {
-                    return Err(io::Error::from(io::ErrorKind::InvalidData));
-                }
-                // Call stty now so we don't need to stash. Ignore failures.
-                let _ = Command::new("stty").args(&["rows", &rows, "cols", &cols])
-                    .status();
             },
             // systemd.machine_id
             [b's', b'y', b's', b't', b'e', b'm', b'd', b'.',
@@ -325,30 +327,21 @@ fn init_net_service(systemd_machine_id: Option<&str>) -> io::Result<()> {
     Ok(())
 }
 
-fn init_exec_systemd(hostname: String) {
+fn init_exec_systemd(envs: [(&str, &str); 6]) {
     let e = Command::new(SYSTEMD_BIN_PATH)
-        .envs([
-            ("RAPIDO_INIT", "0.1"),
-            ("HOSTNAME", &hostname),
-        ])
+        // use systemd specific shutdown / reboot aliases
+        .env("DRACUT_SYSTEMD", "1")
+        .envs(envs)
         .exec();
     panic!("systemd failed to start: {}", e);
 }
 
-fn init_shell(hostname: String) -> io::Result<()> {
+fn init_shell(envs: [(&str, &str); 6]) -> io::Result<()> {
     // rapido.rc starts subsequent autorun scripts
     // TODO future: allow for starting binary autorun payloads instead
     let mut spawned = Command::new("setsid")
         .args(&["--ctty", "--", "bash", "--rcfile", "/rapido.rc", "-i"])
-        .envs([
-            // RAPIDO_INIT indicates this (non-Dracut) init to vm_autorun, etc.
-            ("RAPIDO_INIT", "0.1"),
-            // TODO: should match rapido-cut BIN_PATHS
-            ("PATH", "/usr/sbin:/usr/bin:/sbin:/bin:."),
-            ("TERM", "linux"),
-            ("HOSTNAME", &hostname),
-            ("PS1", format!("{}:${{PWD}}# ", hostname).as_str())
-        ])
+        .envs(envs)
         .spawn()
         .expect("failed to execute bash via setsid");
     match spawned.wait() {
@@ -421,15 +414,26 @@ fn init_main() -> io::Result<()> {
         init_net_conf(&kcli_args)?;
     }
 
+    let ps1 = format!("{}:${{PWD}}# ", hostname);
+    let envs = [
+        ("HOSTNAME", hostname.as_str()),
+        // TODO: should match rapido-cut BIN_PATHS
+        ("PATH", "/usr/sbin:/usr/bin:/sbin:/bin"),
+        ("PS1", ps1.as_str()),
+        // RAPIDO_INIT indicates this (non-Dracut) init to vm_autorun, etc.
+        ("RAPIDO_INIT", "0.1"),
+        ("STTY_RC", kcli_args.stty_rc.unwrap_or("")),
+        ("TERM", "linux"),
+    ];
     if has_systemd {
         // systemd rapido-init.target starts autorun scripts and bash prompt.
         // Net services may be started via systemd wants, set in initramfs.
-        init_exec_systemd(hostname);
+        init_exec_systemd(envs);
     } else {
         if has_net {
             init_net_service(kcli_args.systemd_machine_id)?;
         }
-        init_shell(hostname)?;
+        init_shell(envs)?;
     }
 
     Ok(())
@@ -464,6 +468,7 @@ mod tests {
                 rapido_vm_num: Some("3"),
                 rapido_hostname: None,
                 rapido_tap_mac: None,
+                stty_rc: None,
                 systemd_machine_id: None,
                 console: None,
             }
@@ -476,12 +481,13 @@ mod tests {
                 rapido_vm_num: Some("4"),
                 rapido_hostname: Some("rapido1"),
                 rapido_tap_mac: None,
+                stty_rc: None,
                 systemd_machine_id: None,
                 console: Some("ttyS0"),
             }
         );
 
-        let kcli = b"rapido.mac.tap1=b8:ac:24:45:c5:01 rapido.mac.tap2=b8:ac:24:45:c5:02";
+        let kcli = b"rapido.mac.tap1=b8:ac:24:45:c5:01 rapido.mac.tap2=b8:ac:24:45:c5:02 rapido.stty=120,12";
         assert_eq!(
             kcli_parse(kcli).expect("kcli_parse failed"),
             KcliArgs {
@@ -491,6 +497,7 @@ mod tests {
                         ("tap1", "b8:ac:24:45:c5:01"),
                         ("tap2", "b8:ac:24:45:c5:02"),
                 ])),
+                stty_rc: Some("120,12"),
                 systemd_machine_id: None,
                 console: None,
             }
