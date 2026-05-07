@@ -20,7 +20,7 @@ _rt_require_networking
 req_inst=()
 _rt_require_lib req_inst "libkeyutils.so.1"
 
-"$DRACUT" --install "tail blockdev ps rmdir resize dd vim grep find df sha256sum \
+"$DRACUT" --install "tail blockdev ps rmdir stty dd vim grep find df sha256sum \
 		   strace mkfs.xfs killall nvme rdma \
 		   ${req_inst[*]}" \
 	--add-drivers "nvme-core nvme-fabrics nvme-rdma nvmet nvmet-rdma \

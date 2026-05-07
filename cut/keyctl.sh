@@ -10,7 +10,7 @@ watch_test_bin="${KERNEL_SRC}/samples/watch_queue/watch_test"
 [[ -n $KERNEL_SRC && -x "$watch_test_bin" ]] || watch_test_bin=""
 
 "$DRACUT" \
-	--install "$watch_test_bin keyctl strace resize ps rmdir dd" \
+	--install "$watch_test_bin keyctl strace stty ps rmdir dd" \
 	--modules "base" \
 	"${DRACUT_RAPIDO_ARGS[@]}" \
 	"$DRACUT_OUT" || _fail "dracut failed"

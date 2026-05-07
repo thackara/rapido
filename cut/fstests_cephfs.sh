@@ -19,7 +19,7 @@ pam_paths=()
 _rt_require_pam_mods pam_paths "pam_rootok.so" "pam_limits.so"
 _rt_mem_resources_set "2048M"
 
-"$DRACUT" --install "tail blockdev ps rmdir resize dd vim grep find df sha256sum \
+"$DRACUT" --install "tail blockdev ps rmdir stty dd vim grep find df sha256sum \
 		   strace mkfs free su \
 		   which perl awk bc touch cut chmod true false unlink \
 		   mktemp getfattr setfattr chacl attr killall hexdump sync \

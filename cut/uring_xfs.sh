@@ -27,7 +27,7 @@ if [[ -d $KERNEL_SRC ]]; then
 	done
 fi
 
-"$DRACUT" --install "tail ps rmdir resize dd vim grep find df sha256sum \
+"$DRACUT" --install "tail ps rmdir stty dd vim grep find df sha256sum \
 		   strace mkfs mkfs.xfs tee timeout ip \
 		   stat which touch cut chmod true false \
 		   id sort uniq date expr tac diff head dirname seq \

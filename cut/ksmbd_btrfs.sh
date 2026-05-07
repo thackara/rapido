@@ -43,7 +43,6 @@ bin mkdir
 bin mkfs
 bin mkfs.btrfs
 bin ps
-bin resize
 bin rmdir
 bin seq
 bin setfacl

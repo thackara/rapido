@@ -17,7 +17,7 @@ fio --directory="${tmp_vdata}" --aux-path="${tmp_vdata}" \
 touch --date=@1641548270 "${tmp_vdata}/fiod"
 
 "$DRACUT" \
-	--install "resize fio stat" \
+	--install "stty fio stat" \
 	--include "${tmp_vdata}/fiod" "/fiod" \
 	--modules "base" \
 	"${DRACUT_RAPIDO_ARGS[@]}" \

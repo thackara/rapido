@@ -24,7 +24,7 @@ fses=(btrfs bcachefs exfat ext2 ext3 ext4 fuse ntfs vfat xfs)
 		fgrep find free gdb getconf getfacl getfattr grep head hexdump hostname
 		id ip kill killall ldd link losetup lsattr lsmod ltrace md5sum mountpoint
 		${fses[*]/#/mkfs.} mktemp ${fses[*]/#/mount.} od parted perl pgrep ping
-		ping6 pkill ps quota quotacheck quotaon resize rev rmdir sed seq
+		ping6 pkill ps quota quotacheck quotaon stty rev rmdir sed seq
 		setfacl setfattr sort stat strace sync sysctl tac tail tar tc tee touch
 		tr true truncate uniq unlink vgremove wc which xargs xxd yes
 		${LTP_DIR}/bin/* ${LTP_DIR}/testcases/bin/*" \

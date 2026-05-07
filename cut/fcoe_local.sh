@@ -20,7 +20,7 @@ req_inst=()
 _rt_require_lib req_inst "libkeyutils.so.1"
 _rt_mem_resources_set "2048M"
 
-"$DRACUT" --install "tail blockdev ps rmdir resize dd vim grep find df sha256sum \
+"$DRACUT" --install "tail blockdev ps rmdir stty dd vim grep find df sha256sum \
 		   strace mkfs.xfs killall truncate dirname fipvlan basename \
 		   ${req_inst[*]}" \
 	--add-drivers "target_core_mod tcm_fc target_core_iblock \

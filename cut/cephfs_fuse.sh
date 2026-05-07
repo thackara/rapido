@@ -19,7 +19,7 @@ req_inst=()
 _rt_require_lib req_inst "libsoftokn3.so \
 		 libfreeblpriv3.so"	# NSS_InitContext() fails without
 
-"$DRACUT" --install "tail ps rmdir resize dd vim grep find df sha256sum \
+"$DRACUT" --install "tail ps rmdir stty dd vim grep find df sha256sum \
 		   strace stat truncate touch cut chmod getfattr setfattr \
 		   getfacl setfacl killall sync dirname seq \
 		   $CEPH_FUSE_BIN \

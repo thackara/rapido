@@ -25,7 +25,7 @@ _rt_mem_resources_set "1024M"
 # - ctdb_event -> ctdb-event
 # - config/events.d -> config/events
 # - ctdb-config & ctdb-path -> new binaries
-"$DRACUT" --install "tail blockdev ps rmdir resize dd vim grep find df sha256sum \
+"$DRACUT" --install "tail blockdev ps rmdir stty dd vim grep find df sha256sum \
 		   strace xargs timeout \
 		   which perl awk bc touch cut chmod true false \
 		   getfattr setfattr chacl attr killall sync \

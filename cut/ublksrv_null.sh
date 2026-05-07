@@ -13,7 +13,7 @@ _rt_require_conf_dir UBLKSRV_SRC
 # if liburing is set then pull in SOs, let Dracut grab system lib if not
 [ -n "$LIBURING_SRC" ] && liburing_libs="${LIBURING_SRC}/src/liburing.so.*"
 
-"$DRACUT" --install "tail ps rmdir resize dd vim grep find df truncate \
+"$DRACUT" --install "tail ps rmdir stty dd vim grep find df truncate \
 		strace sync uuidgen $liburing_libs \
 		${UBLKSRV_SRC}/.libs/ublk
 		${UBLKSRV_SRC}/lib/.libs/libublksrv.so.*" \

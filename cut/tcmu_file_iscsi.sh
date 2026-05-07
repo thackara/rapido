@@ -20,7 +20,7 @@ _rt_require_networking
 _rt_require_conf_dir TCMU_RUNNER_SRC
 _rt_mem_resources_set "2048M"
 
-"$DRACUT" --install "tail ps rmdir resize dd vim grep find df truncate \
+"$DRACUT" --install "tail ps rmdir stty dd vim grep find df truncate \
 		   strace sync uuidgen \
 		   ${TCMU_RUNNER_SRC}/tcmu-runner \
 		   ${TCMU_RUNNER_SRC}/handler_file.so" \

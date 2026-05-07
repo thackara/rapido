@@ -48,7 +48,7 @@ EOF
 chmod 755 "$sudo_fake"
 
 # 'file' uses external magic metadata, install it if present.
-"$DRACUT" --install "tail blockdev ps rmdir resize dd vim grep dirname df id \
+"$DRACUT" --install "tail blockdev ps rmdir stty dd vim grep dirname df id \
 		   mktemp date file strings find xfs_io mkfifo ping ping6 ip \
 		   strace shuf free su uuidgen losetup ipcmk \
 		   which awk touch cut chmod true false unlink lsusb tee gzip \

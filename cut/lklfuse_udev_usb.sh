@@ -102,7 +102,6 @@ bin mkfs
 bin mkfs.xfs
 bin mktemp
 bin ps
-bin resize
 bin rm
 bin rmdir
 bin shuf

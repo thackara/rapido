@@ -11,7 +11,7 @@ _rt_require_networking
 req_inst=()
 _rt_require_autofs req_inst
 
-"$DRACUT" --install "tail ps rmdir resize dd vim grep find df \
+"$DRACUT" --install "tail ps rmdir stty dd vim grep find df \
 		   mount.nfs ip ping getfacl setfacl truncate du \
 		   which touch cut chmod true false unlink id \
 		   getfattr setfattr chacl attr killall sync strace \

@@ -12,7 +12,7 @@ _rt_require_networking
 	known_hosts=("--include" "$SSH_KNOWN_HOSTS" "/etc/ssh/ssh_known_hosts")
 
 "$DRACUT" \
-	--install "resize ps rmdir dd ssh /etc/ssh/ssh_config
+	--install "stty ps rmdir dd ssh /etc/ssh/ssh_config
 		   $SSH_IDENTITY ${SSH_IDENTITY}.pub" \
 	"${known_hosts[@]}" \
 	--modules "base" \

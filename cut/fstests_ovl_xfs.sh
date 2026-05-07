@@ -15,7 +15,7 @@ _rt_human_size_in_b "${FSTESTS_ZRAM_SIZE:-1G}" zram_bytes \
 # 2x multiplier for one test and one scratch zram. +2G as buffer
 _rt_mem_resources_set "$((2048 + (zram_bytes * 2 / 1048576)))M"
 
-"$DRACUT" --install "tail blockdev ps rmdir resize dd vim grep find df sha256sum \
+"$DRACUT" --install "tail blockdev ps rmdir stty dd vim grep find df sha256sum \
 		   strace mkfs mkfs.xfs free ip su uuidgen losetup ipcmk \
 		   which perl awk bc touch cut chmod true false unlink \
 		   mktemp getfattr setfattr chacl attr killall hexdump sync \

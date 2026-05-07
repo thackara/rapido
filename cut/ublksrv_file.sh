@@ -13,7 +13,7 @@ _rt_require_conf_dir UBLKSRV_SRC
 # if liburing is set then pull in SOs, let Dracut grab system lib if not
 [ -n "$LIBURING_SRC" ] && liburing_libs="${LIBURING_SRC}/src/liburing.so.*"
 
-"$DRACUT" --install "tail ps rmdir resize dd find df strace sync mkfs.xfs \
+"$DRACUT" --install "tail ps rmdir stty dd find df strace sync mkfs.xfs \
 		truncate $liburing_libs ${UBLKSRV_SRC}/.libs/ublk \
 		${UBLKSRV_SRC}/lib/.libs/libublksrv.so.*" \
 	--add-drivers "ublk_drv xfs zram lzo lzo-rle" \

@@ -15,7 +15,7 @@ py_inc=($(python3 -c \
 	   [print('--include', p, p) for p in sys.path if os.path.exists(p)]" \
 	)) || _fail "failed to determine PYTHON_PATH"
 
-"$DRACUT" --install "tail blockdev ps rmdir resize dd vim grep find df sha256sum \
+"$DRACUT" --install "tail blockdev ps rmdir stty dd vim grep find df sha256sum \
 		   strace mkfs.xfs mkfs.btrfs python3 tee" \
 	--include "$UNIONMOUNT_TESTSUITE_SRC" "$UNIONMOUNT_TESTSUITE_SRC" \
 	"${py_inc[@]}" \

@@ -18,7 +18,7 @@ RAPIDO_DIR="$(realpath -e ${0%/*})/.."
 _rt_require_dracut_args "$RAPIDO_DIR/autorun/nvme_tcp_initiator.sh" "$@"
 _rt_require_networking
 
-"$DRACUT" --install "tail blockdev ps rmdir resize dd vim grep find df sha256sum \
+"$DRACUT" --install "tail blockdev ps rmdir stty dd vim grep find df sha256sum \
 		   strace mkfs.xfs" \
 	--include "$vm_ceph_conf" "/vm_ceph.env" \
 	--add-drivers "nvme-core nvme-fabrics nvme-tcp" \

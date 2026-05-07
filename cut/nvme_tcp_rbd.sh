@@ -17,7 +17,7 @@ _rt_write_ceph_config $vm_ceph_conf
 req_inst=()
 _rt_require_lib req_inst "libkeyutils.so.1"
 
-"$DRACUT" --install "tail blockdev ps rmdir resize dd vim grep find df sha256sum \
+"$DRACUT" --install "tail blockdev ps rmdir stty dd vim grep find df sha256sum \
 		   strace mkfs.xfs \
 		   ${req_inst[*]}" \
 	--include "$CEPH_CONF" "/etc/ceph/ceph.conf" \

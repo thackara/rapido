@@ -20,7 +20,7 @@ EOF
 # writeback caching via a "cache=writeback" parameter.
 _rt_qemu_custom_args_set "$qemu_args_file"
 
-"$DRACUT" --install "tail blockdev ps rmdir resize dd vim grep find df sha256sum \
+"$DRACUT" --install "tail blockdev ps rmdir stty dd vim grep find df sha256sum \
 		   strace mkfs.xfs lsscsi \
 		   ${req_inst[*]}" \
 	--modules "base" \

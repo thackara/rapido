@@ -15,7 +15,7 @@ _rt_require_networking
 _rt_require_ceph
 _rt_write_ceph_config $vm_ceph_conf
 
-"$DRACUT" --install "tail blockdev ps rmdir resize dd grep find df sha256sum \
+"$DRACUT" --install "tail blockdev ps rmdir stty dd grep find df sha256sum \
 		   strace mkfs.xfs uuidgen xxd truncate" \
 	--include "$CEPH_CONF" "/etc/ceph/ceph.conf" \
 	--include "$CEPH_KEYRING" "/etc/ceph/keyring" \

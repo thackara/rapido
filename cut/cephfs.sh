@@ -14,7 +14,7 @@ _rt_require_networking
 _rt_require_ceph
 _rt_write_ceph_config $vm_ceph_conf
 
-"$DRACUT" --install "tail blockdev ps rmdir resize dd vim grep find df sha256sum \
+"$DRACUT" --install "tail blockdev ps rmdir stty dd vim grep find df sha256sum \
 		   strace stat which touch cut chmod true false \
 		   getfattr setfattr getfacl setfacl killall sync \
 		   id sort uniq date expr tac diff head dirname seq" \

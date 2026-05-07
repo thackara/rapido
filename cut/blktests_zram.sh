@@ -9,7 +9,7 @@ _rt_require_dracut_args "$RAPIDO_DIR/autorun/blktests_zram.sh" "$@"
 _rt_require_blktests
 _rt_mem_resources_set "2048M"
 
-"$DRACUT" --install "tail blockdev ps rmdir resize dd vim grep find df sha256sum \
+"$DRACUT" --install "tail blockdev ps rmdir stty dd vim grep find df sha256sum \
 		   getopt tput wc column blktrace losetup parted truncate \
 		   lsblk strace which awk bc touch cut chmod true false mktemp \
 		   killall id sort uniq date expr tac diff head dirname seq \

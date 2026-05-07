@@ -23,7 +23,7 @@ _rt_require_ceph
 req_inst=()
 _rt_require_lib req_inst "libsoftokn3.so libfreeblpriv3.so"
 
-"$DRACUT" --install "tail blockdev ps rmdir resize dd vim grep find df sha256sum \
+"$DRACUT" --install "tail blockdev ps rmdir stty dd vim grep find df sha256sum \
 		   strace mkfs.xfs mkfs.btrfs sync dirname uuidgen \
 		   ${CEPH_SRC}/build/lib/librbd.so \
 		   ${CEPH_SRC}/build/lib/libceph-common.so \

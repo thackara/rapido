@@ -20,7 +20,7 @@ py_inc=($(python3 -c \
 	)) || _fail "failed to determine PYTHON_PATH"
 
 # systemd boot used as it sets some sysctl limits (e.g. core size)
-"$DRACUT" --install "tail blockdev ps rmdir resize dd grep find df \
+"$DRACUT" --install "tail blockdev ps rmdir stty dd grep find df \
 		   python3 robot su useradd sysctl ${req_inst[*]}" \
 	--include "$SYS_PARAM_CHECK_SRC" "$SYS_PARAM_CHECK_SRC" \
 	"${py_inc[@]}" \

@@ -14,7 +14,7 @@ _rt_require_pam_mods req_inst "pam_rootok.so" "pam_limits.so"
 # need enough memory for two 12G null_blk devices
 _rt_mem_resources_set "16384M"
 
-"$DRACUT" --install "tail blockdev ps rmdir resize dd vim grep find df sha256sum \
+"$DRACUT" --install "tail blockdev ps rmdir stty dd vim grep find df sha256sum \
 		   strace mkfs shuf free ip su \
 		   which perl awk bc touch cut chmod true false unlink \
 		   mktemp getfattr setfattr chacl attr killall hexdump sync \

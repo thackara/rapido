@@ -9,7 +9,7 @@ _rt_require_dracut_args "$RAPIDO_DIR/autorun/lib/nfs.sh" \
 			"$RAPIDO_DIR/autorun/nfs_client.sh" "$@"
 _rt_require_networking
 
-"$DRACUT" --install "tail ps rmdir resize dd vim grep find df du truncate \
+"$DRACUT" --install "tail ps rmdir stty dd vim grep find df du truncate \
 		   strace mount.nfs rpcbind rpcinfo rpc.statd sm-notify \
 		   touch chmod getfacl setfacl getfattr setfattr killall sync \
 		   dirname seq basename chattr lsattr stat" \

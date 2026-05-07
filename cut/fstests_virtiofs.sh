@@ -29,7 +29,7 @@ QEMU_EXTRA_ARGS="... -chardev socket,id=c0,path=\${RAPIDO_DIR}/vfsd.sock \\
 EOF
 )"
 
-"$DRACUT" --install "tail blockdev ps rmdir resize dd vim grep find df sha256sum \
+"$DRACUT" --install "tail blockdev ps rmdir stty dd vim grep find df sha256sum \
 		   strace mkfs free su \
 		   which perl awk bc touch cut chmod true false unlink \
 		   mktemp getfattr setfattr chacl attr killall hexdump sync \

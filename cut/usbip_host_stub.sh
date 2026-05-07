@@ -16,7 +16,7 @@ _rt_require_networking
 req_inst=()
 _rt_require_usbip_progs req_inst
 
-"$DRACUT" --install "tail blockdev ps rmdir resize dd grep find df sha256sum \
+"$DRACUT" --install "tail blockdev ps rmdir stty dd grep find df sha256sum \
 		   strace mkfs mkfs.xfs free lsusb ${req_inst[*]}" \
 	--add-drivers "usbip-host usb-storage xhci-hcd xhci-pci" \
 	--modules "base" \

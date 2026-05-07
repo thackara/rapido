@@ -16,7 +16,7 @@ QEMU_EXTRA_ARGS="... -drive if=none,id=o2,file=/tmp/o2dev,cache=none,format=raw,
 EOF
 )"
 
-"$DRACUT" --install "tail blockdev ps rmdir resize dd vim grep find df \
+"$DRACUT" --install "tail blockdev ps rmdir stty dd vim grep find df \
 		   strace xargs timeout \
 		   which awk touch cut chmod true false \
 		   getfattr setfattr chacl attr killall sync \

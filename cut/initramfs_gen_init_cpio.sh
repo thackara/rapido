@@ -21,7 +21,7 @@ fio --directory="${tmp_vdata}" --aux-path="${tmp_vdata}" \
 	--filename=fiod-small || _fail "fio failed to write verification data"
 
 "$DRACUT" \
-	--install "resize fio strace" \
+	--install "stty fio strace" \
 	--modules "base" \
 	"${DRACUT_RAPIDO_ARGS[@]}" \
 	"$DRACUT_OUT" || _fail "dracut failed"
