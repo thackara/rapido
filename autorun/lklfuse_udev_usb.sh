@@ -12,7 +12,7 @@ _vm_ar_hosts_create
 # After/Requires=modprobe@fuse.service for /dev/fuse presence, except the mode
 # is only changed to 0666 by a 50-udev-default.rules fuse rule, which may be
 # processed *after* lklfuse-mount@.service proceeds.
-modprobe -a usb-storage xhci-hcd xhci-pci fuse
+modprobe -a usb-storage xhci-hcd xhci-pci fuse sd_mod
 _vm_ar_dyn_debug_enable
 
 # fuse by default won't allow access to non-mounters, we need to set:
