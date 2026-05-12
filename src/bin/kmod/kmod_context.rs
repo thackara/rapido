@@ -74,16 +74,6 @@ fn extract_module_name(path_str: &str) -> String {
     base_name.replace('-', "_")
 }
 
-impl KmodModule {
-    pub fn name(&self) -> String {
-        extract_module_name(&self.rel_path)
-    }
-
-    pub fn hard_deps(&self) -> Vec<String> {
-        self.hard_deps_paths.iter().map(|p| extract_module_name(&p)).collect()
-    }
-}
-
 impl KmodContext {
     pub fn new(dirname: &Path) -> Result<Self, String> {
         let mut ctx = KmodContext {
@@ -413,17 +403,12 @@ mod tests {
             vec!["kernel/dep1.ko", "kernel/dep2.ko.xz"],
             "Hard deps paths for mod_a incorrect"
         );
-        assert_eq!(
-            mod_a.hard_deps(),
-            vec!["dep1", "dep2"],
-            "Hard deps for mod_a incorrect"
-        );
 
         // Check mod_b (normalization and no deps)
         let mod_b = ctx.modules_hash.get("mod_b").expect("mod_b not found");
         assert_eq!(mod_b.status, ModuleStatus::LoadableModule);
         assert_eq!(mod_b.rel_path, "kernel/mod-b.ko");
-        assert!(mod_b.hard_deps().is_empty(), "mod_b should have no hard deps");
+        assert!(mod_b.hard_deps_paths.is_empty(), "mod_b should have no hard deps");
 
         cleanup_test_dir(&root_path);
     }
@@ -776,11 +761,6 @@ mod tests {
             "hard dependencies check failed"
         );
         assert_eq!(
-            mod_a.hard_deps(),
-            vec!["mod_b", "mod_c"],
-            "hard dependencies check failed"
-        );
-        assert_eq!(
             mod_a.soft_deps_pre,
             vec!["mod_d"],
             "soft pre-dependencies check failed"
@@ -907,12 +887,6 @@ mod tests {
             .find("mod32c")
             .expect("Finding by alias 'mod32c' should resolve");
 
-        // The returned module should be the actual module, mod32c_intel
-        assert_eq!(
-            aliased_mod.name(),
-            "mod32c_intel",
-            "alias lookup should return the real module name"
-        );
         assert_eq!(
             aliased_mod.status,
             ModuleStatus::LoadableModule,
