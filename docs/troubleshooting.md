@@ -1,5 +1,32 @@
 # Troubleshooting
 
+## Configuration
+Unlike bash variables, rapido.conf variables must be set before they are subsequently used.
+If not, you'll encounter an error message from the kv-conf rust library, e.g.:
+```
+> head -n1 rapido.conf
+BR_DEV="rapido-${BRIDGE_SUFFIX}"
+
+> ./rapido cut simple-example
+failed to process "rapido.conf": Custom { kind: InvalidInput, error: "line 1: invalid variable substitution: not seen" }
+```
+This could be resolved with:
+```
+BRIDGE_SUFFIX="bridgy"
+BR_DEV="rapido-${BRIDGE_SUFFIX}"
+```
+
+Similarly, rapido.conf variables must also be enclosed with curly braces when used, e.g.:
+```
+> head -n2 rapido.conf
+BRIDGE_SUFFIX="bridgy"
+BR_DEV="rapido-$BRIDGE_SUFFIX"
+
+> ./rapido cut simple-example
+failed to process "rapido.conf": Custom { kind: InvalidInput, error: "line 2: variables must be wrapped in {} braces" }
+```
+The correct syntax is `BR_DEV="rapido-${BRIDGE_SUFFIX}"`.
+
 ## Compile fixes
 * [GCC >= 15] typedef \_Bool bool (true/false related errors)
 ```
