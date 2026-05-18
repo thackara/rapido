@@ -85,14 +85,14 @@ impl KmodContext {
         ctx.load_hard_dependencies()
             .map_err(|e| format!("Failed to load modules.dep: {}", e))?;
 
+        ctx.load_builtin_modules()
+            .map_err(|e| format!("Failed to load modules.builtin: {}", e))?;
+
         ctx.load_soft_dependencies()
             .map_err(|e| format!("Failed to load modules.softdep: {}", e))?;
 
         // modules.weakdep may be missing
         let _ = ctx.load_weak_dependencies();
-
-        ctx.load_builtin_modules()
-            .map_err(|e| format!("Failed to load modules.builtin: {}", e))?;
 
         ctx.load_aliases()
             .map_err(|e| format!("Failed to load modules.alias: {}", e))?;
@@ -907,6 +907,32 @@ mod tests {
             context.find("virtio-rng").unwrap().rel_path,
             "kernel/drivers/char/hw_random/virtio-rng.ko.zst",
         );
+
+        cleanup_test_dir(&root_path);
+    }
+
+    #[test]
+    fn test_load_builtin_softdep_order() {
+        let root_path = setup_test_dir("builtin_softdep_order");
+
+        let modules_builtin_content = format!("kernel/builtin_mod1.ko\n");
+        write_test_file(&root_path, "modules.builtin", &modules_builtin_content);
+
+        let modules_softdep_content = "softdep builtin_mod1 mod_a\n";
+        write_test_file(&root_path, "modules.softdep", modules_softdep_content);
+
+        let modules_dep_content = format!("kernel/mod_a.ko:\n");
+        write_test_file(&root_path, "modules.dep", &modules_dep_content);
+
+        let ctx = KmodContext::new(&root_path).unwrap();
+
+        let mod1 = ctx
+            .modules_hash
+            .get("builtin_mod1")
+            .expect("builtin_mod1 not found");
+        assert_eq!(mod1.status, ModuleStatus::Builtin);
+        assert_eq!(mod1.soft_deps_pre, vec!["mod_a"]);
+        assert_eq!(mod1.soft_deps_post.len(), 0);
 
         cleanup_test_dir(&root_path);
     }
