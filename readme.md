@@ -76,7 +76,9 @@ The example scripts are fully annotated.
 ## Feedback and Bug Reporting
 
 Please raise any questions or issues upstream via
-<https://github.com/rapido-linux/rapido/issues>
+<https://github.com/rapido-linux/rapido/issues>.
+
+Also see [troubleshooting tips](docs/troubleshooting.md).
 
 
 ## Architecture
