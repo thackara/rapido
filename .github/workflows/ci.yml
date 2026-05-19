@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: (LGPL-2.1 OR LGPL-3.0)
+# Copyright (C) SUSE S.A. 2026, all rights reserved.
 name: CI
 
 on:
@@ -16,20 +18,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: install rust and kernel build tools
         run: |
-          case "$(uname -m)" in
-          x86_64)
-            export QEMU_SYSTEM=qemu-system-x86
-            ;;
-          aarch64)
-            export QEMU_SYSTEM=qemu-system-aarch64
-            ;;
-          *)
-            exit 1
-            ;;
-          esac
           sudo apt-get update -y
           sudo apt-get install -y --no-install-recommends --no-install-suggests \
-            cargo-1.85 rustc "$QEMU_SYSTEM" qemu-utils expect \
+            cargo-1.85 rustc qemu-system-x86 qemu-utils expect \
             make flex bison libelf-dev
           sudo lsblk
           df

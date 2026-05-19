@@ -13,16 +13,17 @@ cargo build --offline --release
 
 Clone this repository and install the following dependencies:
 
-* [QEMU](http://qemu.org):
-  * Boots a given VM image and compiled Linux kernel on the local system
+* [QEMU](http://qemu.org): Boots a given VM image and compiled Linux kernel on
+  the local system
 * [systemd-networkd](https://www.freedesktop.org/wiki/Software/systemd/):
-  * Configures networking within Rapido VMs (optional)
-* [iproute2](https://wiki.linuxfoundation.org/networking/iproute2):
-  * Configures Bridge and TAP devices on the host (optional)
+  Configures networking within Rapido VMs (optional)
+* [iproute2](https://wiki.linuxfoundation.org/networking/iproute2): Configures
+  Bridge and TAP devices on the host (optional)
 
 Rapido obtains **all** dependencies from the local system; no magic images
-or internet downloads are necessary. Individual cut scripts (e.g.
-`cut/fstests_btrfs.sh`) may require extra local dependencies.
+or internet downloads are necessary. Individual cut scripts may require extra
+local dependencies. E.g. `cut/fstests_btrfs.sh` runs xfstests, which is obtained
+from the configured `FSTESTS_SRC` path.
 
 Rapido is primarily configured via `rapido.conf`. To boot a custom Linux
 kernel, copy [rapido.conf.example](rapido.conf.example) and set the
@@ -63,11 +64,16 @@ Subsequent VMs can be booted manually via:
 ./rapido boot
 ```
 
+Rapido can be used to test kernels on confined systems such as GitHub CI
+Runners. See Rapido's own [.github/workflows/ci.yml](.github/workflows/ci.yml)
+file as an example for compiling and booting a mainline kernel VM from a
+`ubuntu-latest` GitHub Runner.
+
 
 ## Adding Your Own Tests
 
-Rapido can be easily extended to test any kernel functionality of
-interest. Simply copy the [cut/simple_example.sh](cut/simple_example.sh)
+Rapido can be easily extended to test most kernel functionality.
+Simply copy the [cut/simple_example.sh](cut/simple_example.sh)
 and [autorun/simple_example.sh](autorun/simple_example.sh) scripts and
 modify them to suit your needs.
 The example scripts are fully annotated.
