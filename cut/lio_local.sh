@@ -1,29 +1,42 @@
 #!/bin/bash
-#
-# Copyright (C) SUSE LINUX GmbH 2016, all rights reserved.
-#
-# This library is free software; you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published
-# by the Free Software Foundation; either version 2.1 of the License, or
-# (at your option) version 3.
-#
-# This library is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
-# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public
-# License for more details.
+# SPDX-License-Identifier: (LGPL-2.1 OR LGPL-3.0)
+# Copyright (C) SUSE S.A. 2016-2026, all rights reserved.
+PATH="target/release:${PATH}"
+rapido-cut --manifest /dev/stdin <<EOF
+file /rapido-rsc/mem/2048M
 
-RAPIDO_DIR="$(realpath -e ${0%/*})/.."
-. "${RAPIDO_DIR}/runtime.vars"
+include net.fest
 
-_rt_require_dracut_args "$RAPIDO_DIR/autorun/lio_local.sh" "$@"
-_rt_require_networking
-_rt_mem_resources_set "2048M"
+autorun autorun/lio_local.sh $*
 
-"$DRACUT" --install "tail blockdev ps rmdir stty dd vim grep find df sha256sum \
-		   strace mkfs.xfs truncate losetup dmsetup \
-		   /usr/lib/udev/rules.d/95-dm-notify.rules" \
-	--add-drivers "iscsi_target_mod target_core_mod target_core_iblock \
-		       target_core_file dm-delay loop" \
-	--modules "base" \
-	"${DRACUT_RAPIDO_ARGS[@]}" \
-	"$DRACUT_OUT" || _fail "dracut failed"
+bin blockdev
+bin cat
+bin dd
+bin df
+bin dmsetup
+bin find
+bin grep
+bin hostname
+bin ln
+bin losetup
+bin ls
+bin mkdir
+bin mkfs.xfs
+bin nc
+bin ps
+bin rmdir
+bin sha256sum
+bin sleep
+bin strace
+bin stty
+bin tail
+bin truncate
+
+file /usr/lib/udev/rules.d/95-dm-notify.rules /usr/lib/udev/rules.d/95-dm-notify.rules
+
+kmod iscsi_target_mod
+kmod target_core_iblock
+kmod target_core_file
+kmod dm-delay
+kmod loop
+EOF
