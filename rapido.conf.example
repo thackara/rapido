@@ -324,6 +324,12 @@ INITIATOR_IQNS="iqn.2007-10.com.github:sahlberg:libiscsi:iscsi-test \
 #INITIATOR_DISCOVERY_ADDR=""
 ################################
 
+########## libiscsi_test_tool.sh ###########
+# Path to a build of the libiscsi source available at
+# https://github.com/sahlberg/libiscsi .
+#LIBISCSI_SRC=
+############################################
+
 ########## cut/ltp.sh ##########
 # LTP_DIR should correspond to the ltp directory tree after make install.
 # The default below matches ltp's default install path prefix.
