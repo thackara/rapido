@@ -24,10 +24,7 @@ udevadm settle || _fatal
 
 _vm_ar_configfs_mount
 
-modprobe target_core_mod || _fatal
-modprobe target_core_iblock || _fatal
-modprobe target_core_file || _fatal
-modprobe iscsi_target_mod || _fatal
+modprobe -a loop target_core_iblock target_core_file iscsi_target_mod || _fatal
 
 _vm_ar_dyn_debug_enable
 
