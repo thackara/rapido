@@ -20,7 +20,7 @@ modprobe iscsi_tcp
 
 _vm_ar_dyn_debug_enable
 
-mkdir -p /etc/iscsi
+mkdir -p /etc/iscsi /run/lock/
 [ -n "$INITIATOR_IQNS" ] \
 	|| _fatal "INITIATOR_IQNS config required for InitiatorName"
 inames=( $INITIATOR_IQNS )
