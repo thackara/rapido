@@ -14,9 +14,9 @@ mem_rsc="$((2048 + (zram_bytes * 2 / 1048576)))M"
 
 man_deps=(man /etc/manpath.config \
 	  $(man --path xfs_io xfs_spaceman xfs_db xfs_quota))
-[[ ${man_deps[@]} == ${man_deps[@]%.gz} ]] || man_deps+=(zcat gzip)
-[[ ${man_deps[@]} == ${man_deps[@]%.bz2} ]] || man_deps+=(bzcat)
-[[ ${man_deps[@]} == ${man_deps[@]%.xz} ]] || man_deps+=(xzcat)
+[[ "${man_deps[*]}" == "${man_deps[*]%.gz}" ]] || man_deps+=(zcat gzip)
+[[ "${man_deps[*]}" == "${man_deps[*]%.bz2}" ]] || man_deps+=(bzcat)
+[[ "${man_deps[*]}" == "${man_deps[*]%.xz}" ]] || man_deps+=(xzcat)
 
 # xfs/122: pull in compiler and xfs headers
 _rt_require_gcc req_inst stdio.h xfs/xfs.h xfs/xfs_types.h xfs/xfs_fs.h \

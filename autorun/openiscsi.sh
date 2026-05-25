@@ -36,7 +36,7 @@ iscsid || _fatal
 iscsiadm -m discovery -t sendtargets -p $INITIATOR_DISCOVERY_ADDR || _fatal
 
 # auth for normal (non-discovery) sessions
-for i in $(ls /etc/iscsi/nodes/*/*/default); do
+for i in /etc/iscsi/nodes/*/*/default; do
 	if [[ -n "${ISCSI_USER}${ISCSI_PASS}" ]]; then
 		sed -i "s#node.session.auth.authmethod = .*#node.session.auth.authmethod = CHAP#" $i
 		echo "node.session.auth.username = $ISCSI_USER" >> $i
