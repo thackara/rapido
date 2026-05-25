@@ -11,6 +11,19 @@ on:
 # chmod /dev/kvm to allow non-root QEMU to use it
 # if building distro config install: libdw-dev libssl-dev
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update -y && sudo apt-get install -y shellcheck
+      - name: Run shellcheck
+        run: shellcheck --severity=error autorun/*.sh cut/*.sh selftest/*.sh rapido
+      - name: Run Rust format check and clippy lint
+        run: |
+          cargo --version
+          cargo fmt --check --all
+          cargo clippy --offline -- -A warnings -A clippy::byte_char_slices
   test:
     # aarch64 github runners don't provide kvm
     runs-on: ubuntu-latest
