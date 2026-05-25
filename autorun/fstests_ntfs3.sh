@@ -8,7 +8,7 @@ set -x
 
 # create mkfs symlink for xfstests, which assumes mkfs.$FSTYPE
 mkfsbin="$(type -P mkfs.ntfs)"
-ln -s "${mkfsbin}" "${mkfsbin}3" || break
+ln -s "${mkfsbin}" "${mkfsbin}3" || _fatal "failed to create mkfs.ntfs3 symlink"
 
 modprobe virtio_blk
 modprobe zram num_devices="0" || _fatal "failed to load zram module"

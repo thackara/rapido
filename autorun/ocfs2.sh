@@ -36,9 +36,9 @@ EOF
 
 # expect a device with serial=OCFS2
 declare -A _CFG=(["OCFS2"]="")
-for i in $(ls /sys/block); do
-	ser="$(cat /sys/block/${i}/serial 2>/dev/null)" || continue
-	[[ -v "_CFG[$ser]" ]] && _CFG[$ser]="/dev/${i}"
+for i in /sys/block/*; do
+	ser="$(cat ${i}/serial 2>/dev/null)" || continue
+	[[ -v "_CFG[$ser]" ]] && _CFG[$ser]="/dev/${i##*/}"
 done
 
 [ -b "${_CFG[OCFS2]}" ] || _fatal "block device with serial=OCFS2 required"
