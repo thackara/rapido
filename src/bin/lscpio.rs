@@ -14,7 +14,9 @@ fn main() -> io::Result<()> {
 
     // avoid BufReader: regular fh benchmarked slightly faster, despite fewer
     // syscalls: read(hdr)+read(name)+seek() vs read(hdr+name+readahead)+seek()
-    let f = fs::OpenOptions::new().read(true).open(args.nth(1).unwrap())?;
+    let f = fs::OpenOptions::new()
+        .read(true)
+        .open(args.nth(1).unwrap())?;
     let mut archive_walker = cpio::archive_walk(f)?;
     while let Some(archive_ent) = archive_walker.next() {
         let archive_ent = archive_ent?;

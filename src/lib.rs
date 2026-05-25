@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: (GPL-2.0 OR GPL-3.0)
 // Copyright (C) 2025 SUSE LLC
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str;
 
@@ -39,9 +39,7 @@ pub fn host_kernel_vers() -> io::Result<String> {
     host_kernel_vers_parse(&kvers)
 }
 
-pub fn conf_src_or_host_kernel_vers(
-    conf: &HashMap<String, String>
-) -> io::Result<String> {
+pub fn conf_src_or_host_kernel_vers(conf: &HashMap<String, String>) -> io::Result<String> {
     match conf.get("KERNEL_SRC") {
         Some(ksrc) if !ksrc.is_empty() => {
             let b = fs::read(format!("{ksrc}/include/config/kernel.release"))?;
@@ -50,7 +48,7 @@ pub fn conf_src_or_host_kernel_vers(
                 None => &b,
             };
             Ok(String::from_utf8_lossy(btrimmed).to_string())
-        },
+        }
         None | Some(_) => match conf.get("KERNEL_RELEASE") {
             Some(krel) => Ok(krel.clone()),
             None => host_kernel_vers(),
@@ -61,8 +59,8 @@ pub fn conf_src_or_host_kernel_vers(
 // return kmod dependencies based on rapido @conf qemu parameters
 pub fn conf_kmod_deps(conf: &HashMap<String, String>) -> Vec<&str> {
     let mut deps = match conf.get("QEMU_EXTRA_ARGS") {
-        Some(v) if v.contains("virtio-rng-pci") => vec!("virtio_rng"),
-        Some(_) | None => vec!(),
+        Some(v) if v.contains("virtio-rng-pci") => vec!["virtio_rng"],
+        Some(_) | None => vec![],
     };
 
     if conf.get("VIRTFS_SHARE_PATH").is_some() {
@@ -74,30 +72,22 @@ pub fn conf_kmod_deps(conf: &HashMap<String, String>) -> Vec<&str> {
 
 // return an open file handle and path for rapido.conf, which may
 // be @rapido_conf_path or overridden by RAPIDO_CONF env
-pub fn host_rapido_conf_open(
-    rapido_conf_path: &str,
-) -> io::Result<(fs::File, PathBuf)> {
+pub fn host_rapido_conf_open(rapido_conf_path: &str) -> io::Result<(fs::File, PathBuf)> {
     // env file takes precedence
     match env::var("RAPIDO_CONF") {
-        Ok(c) => {
-            match fs::File::open(&c) {
-                Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                    Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        format!("RAPIDO_CONF missing at {}", c)
-                    ))
-                },
-                Err(e) => Err(e),
-                Ok(f) => Ok((f, PathBuf::from(c))),
-            }
+        Ok(c) => match fs::File::open(&c) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("RAPIDO_CONF missing at {}", c),
+            )),
+            Err(e) => Err(e),
+            Ok(f) => Ok((f, PathBuf::from(c))),
         },
         Err(env::VarError::NotPresent) => {
             let f = fs::File::open(rapido_conf_path)?;
             Ok((f, PathBuf::from(rapido_conf_path)))
-        },
-        Err(env::VarError::NotUnicode(_)) => {
-            Err(io::Error::from(io::ErrorKind::InvalidInput))
-        },
+        }
+        Err(env::VarError::NotUnicode(_)) => Err(io::Error::from(io::ErrorKind::InvalidInput)),
     }
 }
 
@@ -106,7 +96,10 @@ pub fn conf_defaults() -> HashMap<String, String> {
         ("DRACUT_OUT".to_string(), RAPIDO_DRACUT_OUT.to_string()),
         ("QEMU_PID_DIR".to_string(), RAPIDO_QEMU_PID_DIR.to_string()),
         ("VM_NET_CONF".to_string(), RAPIDO_NET_CONF_PATH.to_string()),
-        ("QEMU_EXTRA_ARGS".to_string(), RAPIDO_QEMU_EXTRA_ARGS.to_string()),
+        (
+            "QEMU_EXTRA_ARGS".to_string(),
+            RAPIDO_QEMU_EXTRA_ARGS.to_string(),
+        ),
     ])
 }
 
@@ -125,14 +118,20 @@ mod tests {
         pub fn new() -> TempDir {
             let mut b = [0u8; 16];
             let mut dirname = String::from("test-rapido-lib-");
-            fs::File::open("/dev/urandom").unwrap().read_exact(&mut b).unwrap();
+            fs::File::open("/dev/urandom")
+                .unwrap()
+                .read_exact(&mut b)
+                .unwrap();
             for i in &b {
                 dirname.push_str(&format!("{:02x}", i));
             }
 
             fs::create_dir(&dirname).unwrap();
             eprintln!("created tmp dir: {}", dirname);
-            TempDir { dir: PathBuf::from(&dirname), dirname }
+            TempDir {
+                dir: PathBuf::from(&dirname),
+                dirname,
+            }
         }
     }
 
@@ -153,9 +152,10 @@ mod tests {
 
     #[test]
     fn test_conf_kmod_deps() {
-        let conf: HashMap<String, String> = HashMap::from([
-            ("QEMU_EXTRA_ARGS".to_string(), "-device virtio-rng-pci".to_string())
-        ]);
+        let conf: HashMap<String, String> = HashMap::from([(
+            "QEMU_EXTRA_ARGS".to_string(),
+            "-device virtio-rng-pci".to_string(),
+        )]);
         let kmods = conf_kmod_deps(&conf);
         assert!(kmods.contains(&"virtio_rng"));
     }

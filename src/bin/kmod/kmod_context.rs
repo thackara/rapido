@@ -408,7 +408,10 @@ mod tests {
         let mod_b = ctx.modules_hash.get("mod_b").expect("mod_b not found");
         assert_eq!(mod_b.status, ModuleStatus::LoadableModule);
         assert_eq!(mod_b.rel_path, "kernel/mod-b.ko");
-        assert!(mod_b.hard_deps_paths.is_empty(), "mod_b should have no hard deps");
+        assert!(
+            mod_b.hard_deps_paths.is_empty(),
+            "mod_b should have no hard deps"
+        );
 
         cleanup_test_dir(&root_path);
     }
@@ -559,10 +562,7 @@ mod tests {
             ModuleStatus::Builtin,
             "builtin_mod1 status incorrect"
         );
-        assert!(
-            mod1.rel_path.is_empty(),
-            "Builtin path should be empty"
-        );
+        assert!(mod1.rel_path.is_empty(), "Builtin path should be empty");
 
         // Check builtin_mod2 (normalization)
         let mod2 = ctx
@@ -590,10 +590,7 @@ mod tests {
         write_test_file(&root_path, "modules.dep", modules_dep_content);
 
         // builtin mod_b collides with modules.dep entry
-        let modules_builtin_content = concat!(
-            "kernel/builtin_mod1.ko\n",
-            "kernel/mod_b.ko\n"
-        );
+        let modules_builtin_content = concat!("kernel/builtin_mod1.ko\n", "kernel/mod_b.ko\n");
         write_test_file(&root_path, "modules.builtin", modules_builtin_content);
 
         ctx.load_hard_dependencies().unwrap();
@@ -751,8 +748,7 @@ mod tests {
         let mod_a = context.find("mod_a").expect("mod_a should be found");
         assert_eq!(mod_a.status, ModuleStatus::LoadableModule);
         assert_eq!(
-            mod_a.rel_path,
-            "kernel/mod_a.ko",
+            mod_a.rel_path, "kernel/mod_a.ko",
             "Path should point to the module file"
         );
         assert_eq!(
@@ -780,8 +776,7 @@ mod tests {
         let mod_b = context.find("mod_b").expect("mod_b should be found");
         assert_eq!(mod_b.status, ModuleStatus::LoadableModule);
         assert_eq!(
-            mod_b.rel_path,
-            "kernel/mod_b.ko.xz",
+            mod_b.rel_path, "kernel/mod_b.ko.xz",
             "Path should point to the compressed module file"
         );
         assert_eq!(
@@ -893,8 +888,7 @@ mod tests {
             "Resolved module status should be LoadableModule"
         );
         assert_eq!(
-            aliased_mod.rel_path,
-            "kernel/arch/x86/sub/mod32c-intel.ko.zst",
+            aliased_mod.rel_path, "kernel/arch/x86/sub/mod32c-intel.ko.zst",
             "Resolved module path is incorrect"
         );
 

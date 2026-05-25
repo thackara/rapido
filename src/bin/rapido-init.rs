@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: (GPL-2.0 OR GPL-3.0)
 // Copyright (C) 2025 SUSE LLC
-use std::io::{self, Write};
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
-use std::collections::HashMap;
+use std::io::{self, Write};
 use std::os::unix;
-use std::process::Command;
 use std::os::unix::process::CommandExt;
+use std::process::Command;
 use std::str;
 
 // we expect it in root on VMs
@@ -64,8 +64,7 @@ fn init_mount(do_debugfs: bool, do_virtfs: bool) -> io::Result<()> {
     Ok(())
 }
 
-#[derive(PartialEq)]
-#[derive(Debug)]
+#[derive(PartialEq, Debug)]
 struct KcliArgs<'a> {
     rapido_hostname: Option<&'a str>,
     rapido_vm_num: Option<&'a str>,
@@ -94,50 +93,48 @@ fn kcli_parse(kcmdline: &[u8]) -> io::Result<KcliArgs<'_>> {
     for w in kcmdline.split(|c| *c == b' ' || *c == b'\n') {
         match w {
             // rapido.hostname
-            [b'r', b'a', b'p', b'i', b'd', b'o', b'.',
-            b'h', b'o', b's', b't', b'n', b'a', b'm', b'e', b'=', val @ ..] => {
+            [b'r', b'a', b'p', b'i', b'd', b'o', b'.', b'h', b'o', b's', b't', b'n', b'a', b'm', b'e', b'=', val @ ..] =>
+            {
                 args.rapido_hostname = match str::from_utf8(val) {
                     Err(_) => {
                         return Err(io::Error::from(io::ErrorKind::InvalidData));
-                    },
+                    }
                     Ok(s) => Some(s),
                 };
-            },
+            }
             // rapido.vm_num
-            [b'r', b'a', b'p', b'i', b'd', b'o', b'.',
-            b'v', b'm', b'_', b'n', b'u', b'm', b'=', val @ ..] => {
+            [b'r', b'a', b'p', b'i', b'd', b'o', b'.', b'v', b'm', b'_', b'n', b'u', b'm', b'=', val @ ..] =>
+            {
                 args.rapido_vm_num = match str::from_utf8(val) {
                     Err(_) => {
                         return Err(io::Error::from(io::ErrorKind::InvalidData));
-                    },
+                    }
                     Ok(s) => Some(s),
                 };
-
-            },
+            }
             // rapido.mac.<tap>=<mac>
-            [b'r', b'a', b'p', b'i', b'd', b'o', b'.',
-            b'm', b'a', b'c', b'.', tap_mac_kv @ ..] => {
+            [b'r', b'a', b'p', b'i', b'd', b'o', b'.', b'm', b'a', b'c', b'.', tap_mac_kv @ ..] => {
                 let (tap, mac) = match str::from_utf8(tap_mac_kv) {
                     Err(_) => {
                         return Err(io::Error::from(io::ErrorKind::InvalidData));
-                    },
+                    }
                     Ok(s) if !s.contains('=') => {
                         return Err(io::Error::from(io::ErrorKind::InvalidData));
-                    },
+                    }
                     Ok(s) => s.split_once('=').unwrap(),
                 };
                 let map = match args.rapido_tap_mac {
-                    None => HashMap::from([ (tap, mac) ]),
+                    None => HashMap::from([(tap, mac)]),
                     Some(mut m) => {
                         m.insert(tap, mac);
                         m
-                    },
+                    }
                 };
                 args.rapido_tap_mac = Some(map);
-            },
+            }
             // rapido.stty=<rows>,<cols>
-            [b'r', b'a', b'p', b'i', b'd', b'o', b'.',
-            b's', b't', b't', b'y', b'=', rows_cols @ ..] => {
+            [b'r', b'a', b'p', b'i', b'd', b'o', b'.', b's', b't', b't', b'y', b'=', rows_cols @ ..] =>
+            {
                 args.stty_rc = match str::from_utf8(rows_cols) {
                     Err(_) => Err(io::Error::from(io::ErrorKind::InvalidData)),
                     Ok(rs_cs) => match rs_cs.split_once(',') {
@@ -148,31 +145,30 @@ fn kcli_parse(kcmdline: &[u8]) -> io::Result<KcliArgs<'_>> {
                             } else {
                                 Ok(Some(rs_cs))
                             }
-                        },
-                    }
+                        }
+                    },
                 }?;
-            },
+            }
             // systemd.machine_id
-            [b's', b'y', b's', b't', b'e', b'm', b'd', b'.',
-            b'm', b'a', b'c', b'h', b'i', b'n', b'e', b'_', b'i', b'd', b'=',
-            val @ ..] => {
+            [b's', b'y', b's', b't', b'e', b'm', b'd', b'.', b'm', b'a', b'c', b'h', b'i', b'n', b'e', b'_', b'i', b'd', b'=', val @ ..] =>
+            {
                 args.systemd_machine_id = match str::from_utf8(val) {
                     Err(_) => {
                         return Err(io::Error::from(io::ErrorKind::InvalidData));
-                    },
+                    }
                     Ok(s) => Some(s),
                 };
-            },
+            }
             // console
             [b'c', b'o', b'n', b's', b'o', b'l', b'e', b'=', val @ ..] => {
                 args.console = match str::from_utf8(val) {
                     Err(_) => {
                         return Err(io::Error::from(io::ErrorKind::InvalidData));
-                    },
+                    }
                     Ok(s) => Some(s),
                 };
-            },
-            [ _unused @ .. ] => {},
+            }
+            [_unused @ ..] => {}
         };
     }
 
@@ -186,16 +182,17 @@ fn kmods_load(kmods: &Vec<&str>) -> io::Result<()> {
             .env("PATH", "/usr/sbin:/usr/bin:/sbin:/bin")
             .arg("-a")
             .args(kmods)
-            .status() {
+            .status()
+        {
             Err(e) => {
                 eprintln!("modprobe error: {:?}", e);
                 return Err(io::Error::from(io::ErrorKind::BrokenPipe));
-            },
+            }
             Ok(status) if !status.success() => {
                 println!("modprobe failed: {:?}", status);
                 return Err(io::Error::from(io::ErrorKind::BrokenPipe));
-            },
-            Ok(_) => {},
+            }
+            Ok(_) => {}
         };
     }
 
@@ -208,15 +205,13 @@ fn init_hostname(kcli_args: &KcliArgs) -> io::Result<String> {
             let mut h = String::from("rapido");
             h.push_str(kcli_args.rapido_vm_num.unwrap());
             h
-        },
-        Some(hd) => {
-            match hd.split_once('.') {
-                Some((h, d)) => {
-                    fs::write("/proc/sys/kernel/domainname", d)?;
-                    h.to_string()
-                },
-                None => hd.to_string(),
+        }
+        Some(hd) => match hd.split_once('.') {
+            Some((h, d)) => {
+                fs::write("/proc/sys/kernel/domainname", d)?;
+                h.to_string()
             }
+            None => hd.to_string(),
         },
     };
 
@@ -236,19 +231,22 @@ fn init_net_conf(kcli_args: &KcliArgs) -> io::Result<()> {
     }
 
     match &kcli_args.rapido_tap_mac {
-        Some(map) => for (tap, mac) in map {
-            let mut f = match fs::OpenOptions::new()
-                .write(true)
-                .append(true)
-                .create(false)
-                .open(format!("{}/{}.network", vm_netdir, tap)) {
+        Some(map) => {
+            for (tap, mac) in map {
+                let mut f = match fs::OpenOptions::new()
+                    .write(true)
+                    .append(true)
+                    .create(false)
+                    .open(format!("{}/{}.network", vm_netdir, tap))
+                {
                     Err(_) => continue,
                     Ok(f) => f,
-            };
+                };
 
-            write!(f, "\n[Match]\nMACAddress={}", mac)?;
-        },
-        None => {},
+                write!(f, "\n[Match]\nMACAddress={}", mac)?;
+            }
+        }
+        None => {}
     }
 
     let mut f = fs::OpenOptions::new()
@@ -277,7 +275,7 @@ fn init_net_service(systemd_machine_id: Option<&str>) -> io::Result<()> {
         None => {
             eprintln!("systemd.machine_id missing from kcli");
             Err(io::Error::from(io::ErrorKind::InvalidInput))
-        },
+        }
         Some(mid) => fs::write("/etc/machine-id", mid),
     }?;
 
@@ -294,7 +292,7 @@ fn init_net_service(systemd_machine_id: Option<&str>) -> io::Result<()> {
         .map(|res| res.map(|e| e.path().into_os_string()))
         .collect::<Result<Vec<_>, io::Error>>()?;
 
-    let mut udevadm_args = vec!(OsString::from("trigger"));
+    let mut udevadm_args = vec![OsString::from("trigger")];
     udevadm_args.append(&mut entries);
     let status = Command::new("udevadm")
         .args(udevadm_args)
@@ -348,8 +346,8 @@ fn init_shell(envs: [(&str, &str); 6]) -> io::Result<()> {
         Err(e) => {
             eprintln!("bash error {:?}", e);
             return Err(io::Error::from(io::ErrorKind::BrokenPipe));
-        },
-        Ok(status) if status.success() => {},
+        }
+        Ok(status) if status.success() => {}
         Ok(status) => eprintln!("bash ended with status {}", status),
     }
     Ok(())
@@ -370,7 +368,7 @@ fn init_main() -> io::Result<()> {
         Err(e) => {
             println!("failed to open {}: {}", RAPIDO_CONF, e);
             return Err(e);
-        },
+        }
     };
     let mut reader = io::BufReader::new(f);
     let conf = match kv_conf::kv_conf_process(&mut reader) {
@@ -378,14 +376,15 @@ fn init_main() -> io::Result<()> {
         Err(e) => {
             println!("failed to process {}: {:?}", RAPIDO_CONF, e);
             return Err(e);
-        },
+        }
     };
 
     let has_net = match fs::symlink_metadata("/rapido-rsc/net") {
         Err(_) => false,
         Ok(md) => md.is_dir(),
     };
-    let has_dyn_debug = conf.contains_key("DYN_DEBUG_MODULES") || conf.contains_key("DYN_DEBUG_FILES");
+    let has_dyn_debug =
+        conf.contains_key("DYN_DEBUG_MODULES") || conf.contains_key("DYN_DEBUG_FILES");
     let has_virtfs = conf.contains_key("VIRTFS_SHARE_PATH");
     let has_systemd = match fs::symlink_metadata(SYSTEMD_BIN_PATH) {
         Err(_) => false,
@@ -443,10 +442,10 @@ fn main() -> io::Result<()> {
     match init_main() {
         Err(e) => {
             eprintln!("init failed: {:?}", e);
-        },
+        }
         Ok(_) => {
             eprintln!("rapido-init completed, shutting down...");
-        },
+        }
     }
 
     if let Err(e) = init_shutdown() {
@@ -494,8 +493,8 @@ mod tests {
                 rapido_vm_num: None,
                 rapido_hostname: None,
                 rapido_tap_mac: Some(HashMap::from([
-                        ("tap1", "b8:ac:24:45:c5:01"),
-                        ("tap2", "b8:ac:24:45:c5:02"),
+                    ("tap1", "b8:ac:24:45:c5:01"),
+                    ("tap2", "b8:ac:24:45:c5:02"),
                 ])),
                 stty_rc: Some("120,12"),
                 systemd_machine_id: None,
