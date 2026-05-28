@@ -255,3 +255,40 @@ fn main() {
         _ => eprintln!("unknown program {} for completion", prog_cmpl),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_good_completions() {
+        let mut out = Vec::new();
+        let lexp: &[(&str, &str)] = &[
+            (
+                "rapido ",
+                "boot\ncut\nhelp\nlist\nsetup-network\nteardown-network\n",
+            ),
+            ("rapido cu", "cut\n"),
+            ("rapido cut -", "-B\n-f\n-x\n"),
+            ("rapido cut -B -", "-f\n-x\n"),
+            ("rapido cut simple-e", "simple-example\n"),
+            ("rapido cut -f ./whatever simple-e", "simple-example\n"),
+        ];
+
+        for (line, exp) in lexp {
+            complete_rapido(&mut out, line.to_string(), line.len());
+            assert_eq!(&str::from_utf8(&out).unwrap(), exp);
+            out.clear();
+        }
+    }
+
+    #[test]
+    fn test_bad_completions() {
+        let mut out = Vec::new();
+        for bad_line in &["rapido qwer", "rapido cut -G", "rapido cut qwer"] {
+            complete_rapido(&mut out, bad_line.to_string(), bad_line.len());
+            assert!(out.is_empty());
+            out.clear();
+        }
+    }
+}
