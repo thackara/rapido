@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: (GPL-2.0 OR GPL-3.0)
-// Copyright (C) 2026 SUSE LLC
+// Copyright (C) 2026 SUSE S.A.
 use std::env;
 use std::fs;
 use std::io;
@@ -259,6 +259,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str;
 
     #[test]
     fn test_good_completions() {
