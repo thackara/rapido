@@ -118,7 +118,11 @@ create_acl() {
 }
 
 find_fcoedev() {
-	while [ ! -d /sys/class/fc_remote_ports/rport-* ]; do
+	while true; do
+		rports=(/sys/class/fc_remote_ports/rport-*/)
+		if [ -d "${rports[0]}" ]; then
+			break
+		fi
 		sleep 1
 	done
 	for rport in /sys/class/fc_remote_ports/rport-*; do
@@ -130,7 +134,7 @@ find_fcoedev() {
 					  -o ${hctl} = "subsystem" ]; then
 					continue;
 				fi
-				for b in "${target}/${hctl}/block/*"; do
+				for b in "${target}/${hctl}/block/"*; do
 					bdev="$(basename ${b})"
 					if readlink -f /sys/block/${bdev} | grep -q "${hctl}"; then
 						echo $bdev

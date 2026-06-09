@@ -57,7 +57,7 @@ _run_tests() {
 	local tnum=0
 	local t
 
-	for t in $(ls "selftest/test/"${filter}); do
+	for t in selftest/test/${filter}*; do
 		if ! [ -x "${t}" ]; then
 			echo "$t skipped"
 			continue

@@ -8,11 +8,11 @@ use std::io;
 use std::io::BufRead;
 use std::io::Seek;
 use std::io::Write;
-use std::path::{self, Path, PathBuf, Component};
+use std::path::{self, Component, Path, PathBuf};
 
 use elf::abi;
-use elf::ElfStream;
 use elf::endian::AnyEndian;
+use elf::ElfStream;
 
 use crosvm::argument::{self, Argument};
 mod kmod;
@@ -25,9 +25,21 @@ const BIN_PATHS: [&str; 5] = ["/usr/bin", "/usr/sbin", "/usr/lib/systemd", "/bin
 // Extra search paths may be added at runtime via ELF RUNPATH/LibRunPath.
 // $ARCH-linux-gnu is for Debian/Ubuntu.
 #[cfg(target_arch = "x86_64")]
-const LIB_PATHS: [&str; 5] = ["/usr/lib64", "/usr/lib", "/lib64", "/lib", "/usr/lib/x86_64-linux-gnu"];
+const LIB_PATHS: [&str; 5] = [
+    "/usr/lib64",
+    "/usr/lib",
+    "/lib64",
+    "/lib",
+    "/usr/lib/x86_64-linux-gnu",
+];
 #[cfg(target_arch = "aarch64")]
-const LIB_PATHS: [&str; 5] = ["/usr/lib64", "/usr/lib", "/lib64", "/lib", "/usr/lib/aarch64-linux-gnu"];
+const LIB_PATHS: [&str; 5] = [
+    "/usr/lib64",
+    "/usr/lib",
+    "/lib64",
+    "/lib",
+    "/usr/lib/aarch64-linux-gnu",
+];
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 const LIB_PATHS: [&str; 4] = ["/usr/lib64", "/usr/lib", "/lib64", "/lib"];
 // FIXME: don't assume cwd parent location
@@ -37,7 +49,7 @@ const RAPIDO_INIT_PATH: &str = "target/release/rapido-init";
 // FIXME: don't assume cwd location
 const RAPIDO_BASH_RC_PATH: &str = "vm_autorun.env";
 
-const GATHER_ITEM_IGNORE_PARENT: u32 =  1<<0;
+const GATHER_ITEM_IGNORE_PARENT: u32 = 1 << 0;
 
 // Don't print debug messages on release builds...
 #[cfg(debug_assertions)]
@@ -102,9 +114,14 @@ enum GatherEnt {
 fn path_stat(ent: &GatherEnt) -> Result<Fsent, io::Error> {
     let name: &str = match ent {
         GatherEnt::Path(p) => match fs::symlink_metadata(&p) {
-            Ok(md) => return Ok(Fsent {path: p.clone(), md: md}),
+            Ok(md) => {
+                return Ok(Fsent {
+                    path: p.clone(),
+                    md: md,
+                })
+            }
             Err(e) => return Err(e),
-        }
+        },
         GatherEnt::Name(n) => &n,
         GatherEnt::NameDst(n, _) => n,
         GatherEnt::NameStatic(n) => n,
@@ -116,7 +133,7 @@ fn path_stat(ent: &GatherEnt) -> Result<Fsent, io::Error> {
             for dir in paths.iter() {
                 let p = PathBuf::from(dir).join(n);
                 if let Ok(md) = fs::symlink_metadata(&p) {
-                    return Ok(Fsent {path: p, md: md});
+                    return Ok(Fsent { path: p, md: md });
                 }
             }
             // fallback to LIB_PATHS search
@@ -133,15 +150,15 @@ fn path_stat(ent: &GatherEnt) -> Result<Fsent, io::Error> {
         return match fs::symlink_metadata(name) {
             Ok(md) => Ok(Fsent {
                 path: path::absolute(name).expect("absolute failed for good path"),
-                md: md
+                md: md,
             }),
             Err(_) => {
                 return Err(io::Error::new(
                     io::ErrorKind::NotFound,
-                    format!("{} missing", name)
+                    format!("{} missing", name),
                 ));
             }
-        }
+        };
     }
 
     // TODO: set search_paths with name above. Tuple assignment didn't work for me.
@@ -154,7 +171,7 @@ fn path_stat(ent: &GatherEnt) -> Result<Fsent, io::Error> {
     for dir in search_paths.iter() {
         let p = PathBuf::from(dir).join(name);
         if let Ok(md) = fs::symlink_metadata(&p) {
-            return Ok(Fsent {path: p, md: md});
+            return Ok(Fsent { path: p, md: md });
         }
     }
 
@@ -165,7 +182,7 @@ fn path_stat(ent: &GatherEnt) -> Result<Fsent, io::Error> {
                 format!("{} missing from: {:?} & {:?}", name, p, search_paths)
             }
             _ => format!("{} missing from: {:?}", name, search_paths),
-        }
+        },
     ));
 }
 
@@ -176,7 +193,7 @@ fn path_stat(ent: &GatherEnt) -> Result<Fsent, io::Error> {
 fn elf_deps(
     f: &fs::File,
     path: &Path,
-    dups_filter: &mut HashSet<String>
+    dups_filter: &mut HashSet<String>,
 ) -> Result<Vec<GatherEnt>, io::Error> {
     let mut ret: Vec<GatherEnt> = vec![];
 
@@ -197,15 +214,15 @@ fn elf_deps(
                 return Ok(ret);
             }
             d.unwrap()
-        },
+        }
         Err(e) => {
             eprintln!("{:?} elf .dynamic error: {:?}", path, e);
             return Err(io::Error::from(io::ErrorKind::InvalidData));
-        },
+        }
     };
 
-    let mut runpath_offs: Vec<usize> = vec!();
-    let mut needed_offs: Vec<usize> = vec!();
+    let mut runpath_offs: Vec<usize> = vec![];
+    let mut needed_offs: Vec<usize> = vec![];
     for dyna in dynamics.iter() {
         let v = match dyna.d_tag {
             abi::DT_NEEDED => &mut needed_offs,
@@ -226,7 +243,7 @@ fn elf_deps(
         Err(e) => {
             eprintln!("{:?} bad elf dynamic sym table: {:?}", path, e);
             return Err(io::Error::from(io::ErrorKind::InvalidData));
-        },
+        }
         Ok(tup) => {
             if tup.is_none() {
                 dout!("no tables for {:?}", path);
@@ -234,16 +251,17 @@ fn elf_deps(
             }
             let (_, strs) = tup.unwrap();
             strs
-        },
+        }
     };
 
     // get full list of runpaths first
-    let runpaths: Vec<String> = runpath_offs.into_iter().filter_map(|o| {
-        match dynsyms_strs.get(o) {
+    let runpaths: Vec<String> = runpath_offs
+        .into_iter()
+        .filter_map(|o| match dynsyms_strs.get(o) {
             Err(_) => None,
             Ok(s) => Some(s.to_string()),
-        }
-    }).collect();
+        })
+        .collect();
 
     for str_off in needed_offs {
         match dynsyms_strs.get(str_off) {
@@ -262,11 +280,11 @@ fn elf_deps(
                 } else {
                     dout!("duplicate elf dependency({:?}): {:?}", str_off, sraw);
                 }
-            },
+            }
             Err(e) => {
                 eprintln!("{:?} bad elf dynamic sym table: {:?}", path, e);
                 return Err(io::Error::from(io::ErrorKind::InvalidData));
-            },
+            }
         };
     }
 
@@ -302,7 +320,7 @@ fn gather_archive_dirs<W: Seek + Write>(
     }
 
     // mock up md to use for any parent directories. 0111: allow traversal
-    let parent_dirs_amd = cpio::ArchiveMd{
+    let parent_dirs_amd = cpio::ArchiveMd {
         mode: match child_amd.mode & cpio::S_IFMT {
             cpio::S_IFDIR => child_amd.mode,
             _ => (child_amd.mode & !cpio::S_IFMT) | cpio::S_IFDIR | 0111,
@@ -329,11 +347,11 @@ fn gather_archive_dirs<W: Seek + Write>(
                 }
                 // keep walking with @here now at parent
                 continue;
-            },
+            }
             Component::Prefix(_) => {
                 eprintln!("non-Unix path prefixes not supported");
                 return Err(io::Error::from(io::ErrorKind::InvalidInput));
-            },
+            }
             Component::Normal(c) => here.push(c),
         }
 
@@ -392,13 +410,7 @@ fn gather_archive_elfs<W: Seek + Write>(
         }
 
         let amd = cpio::ArchiveMd::from(&cpio_state, &got.md)?;
-        gather_archive_dirs(
-            dst.parent(),
-            &amd,
-            paths_seen,
-            cpio_state,
-            &mut cpio_writer
-        )?;
+        gather_archive_dirs(dst.parent(), &amd, paths_seen, cpio_state, &mut cpio_writer)?;
         match amd.mode & cpio::S_IFMT {
             cpio::S_IFLNK => {
                 // symlinks are tricky, so provide some restrictions:
@@ -413,16 +425,10 @@ fn gather_archive_elfs<W: Seek + Write>(
                     Err(e) => {
                         eprintln!("{:?} canonicalize failed: {:?}", src, e);
                         continue;
-                    },
+                    }
                     Ok(t) => t,
                 };
-                cpio::archive_symlink(
-                    cpio_state,
-                    &dst,
-                    &amd,
-                    &canon_tgt,
-                    &mut cpio_writer
-                )?;
+                cpio::archive_symlink(cpio_state, &dst, &amd, &canon_tgt, &mut cpio_writer)?;
                 dout!("archived symlink: {:?} ({:?})", &dst, canon_tgt);
 
                 // could add a Path ent type to avoid String conversion here...
@@ -453,18 +459,11 @@ fn gather_archive_elfs<W: Seek + Write>(
                 dout!("archived elf: {:?}→{:?}", src, &dst);
             }
             cpio::S_IFDIR => {
-                cpio::archive_path(
-                    cpio_state,
-                    &dst,
-                    &amd,
-                    &mut cpio_writer
-                )?;
+                cpio::archive_path(cpio_state, &dst, &amd, &mut cpio_writer)?;
                 dout!("archived elf dir: {:?}→{:?}", src, &dst);
 
                 let mut entries = fs::read_dir(src)?
-                    .map(|res| res.map(
-                            |e| GatherEnt::Path(src.join(e.file_name()))
-                        ))
+                    .map(|res| res.map(|e| GatherEnt::Path(src.join(e.file_name()))))
                     .collect::<Result<Vec<_>, io::Error>>()?;
                 // sort for reproducibility
                 entries.sort();
@@ -495,22 +494,10 @@ fn archive_kmod_path<W: Seek + Write>(
 ) -> io::Result<()> {
     let md = fs::symlink_metadata(src)?;
     let amd = cpio::ArchiveMd::from(cpio_state, &md)?;
-    gather_archive_dirs(
-        dst.parent(),
-        &amd,
-        paths_seen,
-        cpio_state,
-        &mut cpio_writer
-    )?;
+    gather_archive_dirs(dst.parent(), &amd, paths_seen, cpio_state, &mut cpio_writer)?;
 
     let kmod_f = fs::File::open(src)?;
-    cpio::archive_file(
-        cpio_state,
-        dst,
-        &amd,
-        &kmod_f,
-        cpio_writer,
-    )?;
+    cpio::archive_file(cpio_state, dst, &amd, &kmod_f, cpio_writer)?;
     dout!("archived kmod: {:?} -> {:?}", src, dst);
     Ok(())
 }
@@ -529,7 +516,7 @@ fn archive_kmods_symlink<W: Seek + Write>(
         false => (libp, Path::new("/usr/lib")),
         true => (Path::new("/lib/modules"), Path::new("/usr/lib/modules")),
     };
-    let amd = cpio::ArchiveMd{
+    let amd = cpio::ArchiveMd {
         nlink: 1,
         mode: cpio::S_IFLNK | 0o777,
         uid: 0,
@@ -557,7 +544,7 @@ fn gather_archive_kmod_and_deps<W: Seek + Write>(
         Some(m) if m.status == ModuleStatus::Builtin => {
             dout!("{} builtin", name);
             return Ok(());
-        },
+        }
         Some(m) => m,
     };
 
@@ -572,7 +559,7 @@ fn gather_archive_kmod_and_deps<W: Seek + Write>(
             &kmod_dst,
             paths_seen,
             cpio_state,
-            &mut cpio_writer
+            &mut cpio_writer,
         )?;
     } else {
         dout!("skipping duplicate kmod {:?} and all deps", &kmod_dst);
@@ -588,7 +575,7 @@ fn gather_archive_kmod_and_deps<W: Seek + Write>(
                 &kmod_dst,
                 paths_seen,
                 cpio_state,
-                &mut cpio_writer
+                &mut cpio_writer,
             )?;
         } else {
             dout!("skipping duplicate kmod {:?}", &kmod_dst);
@@ -597,14 +584,17 @@ fn gather_archive_kmod_and_deps<W: Seek + Write>(
 
     // Attempt to pull in soft and weak dependencies for root_mod.
     // Not sure if we should be checking root_mod dependents.
-    for soft_mod in root_mod.soft_deps_pre.iter()
+    for soft_mod in root_mod
+        .soft_deps_pre
+        .iter()
         .chain(root_mod.soft_deps_post.iter())
-        .chain(root_mod.weak_deps.iter()) {
+        .chain(root_mod.weak_deps.iter())
+    {
         let m = match context.find(soft_mod) {
             None => {
                 dout!("{:?} soft / weak kernel dep not found", soft_mod);
                 continue;
-            },
+            }
             Some(m) if m.status == ModuleStatus::Builtin => continue,
             Some(m) => m,
         };
@@ -616,14 +606,14 @@ fn gather_archive_kmod_and_deps<W: Seek + Write>(
                 &kmod_dst,
                 paths_seen,
                 cpio_state,
-                &mut cpio_writer
+                &mut cpio_writer,
             ) {
                 Err(e) if e.kind() == io::ErrorKind::NotFound => {
                     dout!("{:?} soft / weak kernel dep missing", &kmod_src);
                     continue;
-                },
+                }
                 Err(e) => return Err(e),
-                Ok(_) => {},
+                Ok(_) => {}
             }
         } else {
             dout!("skipping duplicate kmod {:?}", &kmod_dst);
@@ -649,13 +639,9 @@ impl GatherKmods {
         let kmod_ctx = match conf.get("KERNEL_INSTALL_MOD_PATH") {
             // should assert that KERNEL_SRC is set?
             Some(kmp) if !kmp.is_empty() => {
-                KmodContext::new(
-                    &PathBuf::from(kmp).join(format!("lib/modules/{krel}"))
-                )
+                KmodContext::new(&PathBuf::from(kmp).join(format!("lib/modules/{krel}")))
             }
-            None | Some(_) if kmod_dst_root.exists() => {
-                KmodContext::new(&kmod_dst_root)
-            }
+            None | Some(_) if kmod_dst_root.exists() => KmodContext::new(&kmod_dst_root),
             None | Some(_) => {
                 // assume that we have a non-Tumbleweed system
                 KmodContext::new(&PathBuf::from("/lib/modules/").join(&krel))
@@ -678,19 +664,19 @@ impl GatherKmods {
                     &data_dst_path,
                     paths_seen,
                     cpio_state,
-                    &mut cpio_writer
+                    &mut cpio_writer,
                 ) {
                     Err(e) if e.kind() == io::ErrorKind::NotFound => {
                         dout!("Module data path {:?} missing", data_src_path);
                         // TODO: only install required, and return error if missing
-                    },
+                    }
                     Err(e) => return Err(e),
-                    Ok(_) => {},
+                    Ok(_) => {}
                 }
             }
         }
 
-        Ok(GatherKmods{
+        Ok(GatherKmods {
             kmod_dst_root,
             kmod_ctx,
         })
@@ -707,9 +693,12 @@ fn gather_archive_kmods<W: Seek + Write>(
     mut cpio_writer: W,
 ) -> io::Result<()> {
     if gk.is_none() {
-        *gk = Some(
-            GatherKmods::init(conf, paths_seen, cpio_state, &mut cpio_writer)?
-        );
+        *gk = Some(GatherKmods::init(
+            conf,
+            paths_seen,
+            cpio_state,
+            &mut cpio_writer,
+        )?);
     }
     let kmod_dst_root = &gk.as_ref().unwrap().kmod_dst_root;
     let kmod_ctx = &gk.as_ref().unwrap().kmod_ctx;
@@ -721,7 +710,7 @@ fn gather_archive_kmods<W: Seek + Write>(
             &kmod_ctx,
             paths_seen,
             cpio_state,
-            &mut cpio_writer
+            &mut cpio_writer,
         ) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 if ignore_missing {
@@ -730,11 +719,11 @@ fn gather_archive_kmods<W: Seek + Write>(
                 }
                 return Err(io::Error::new(
                     io::ErrorKind::NotFound,
-                    format!("{} missing from: {:?}", name, kmod_ctx.module_root)
+                    format!("{} missing from: {:?}", name, kmod_ctx.module_root),
                 ));
             }
             Err(e) => return Err(e),
-            Ok(_) => {},
+            Ok(_) => {}
         };
     }
 
@@ -754,7 +743,7 @@ fn gather_archive_data<W: Seek + Write>(
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 return Err(io::Error::new(
                     io::ErrorKind::NotFound,
-                    format!("{:?} missing", item.src)
+                    format!("{:?} missing", item.src),
                 ));
             }
             Err(e) => return Err(e),
@@ -771,19 +760,14 @@ fn gather_archive_data<W: Seek + Write>(
                 &src_amd,
                 paths_seen,
                 cpio_state,
-                &mut cpio_writer
+                &mut cpio_writer,
             )?;
         }
 
         match src_amd.mode & cpio::S_IFMT {
             // add any subdirs to gather list
             cpio::S_IFDIR => {
-                cpio::archive_path(
-                    cpio_state,
-                    &item.dst,
-                    &src_amd,
-                    &mut cpio_writer
-                )?;
+                cpio::archive_path(cpio_state, &item.dst, &src_amd, &mut cpio_writer)?;
                 dout!("archived data dir: {:?}→{:?}", item.src, item.dst);
 
                 let mut entries = fs::read_dir(&item.src)?
@@ -802,40 +786,23 @@ fn gather_archive_data<W: Seek + Write>(
                         flags: GATHER_ITEM_IGNORE_PARENT,
                     });
                 }
-            },
+            }
             // dataless files can use archive_path
             cpio::S_IFREG if src_amd.len > 0 => {
                 let f = fs::OpenOptions::new().read(true).open(&item.src)?;
-                cpio::archive_file(
-                    cpio_state,
-                    &item.dst,
-                    &src_amd,
-                    &f,
-                    &mut cpio_writer
-                )?;
+                cpio::archive_file(cpio_state, &item.dst, &src_amd, &f, &mut cpio_writer)?;
                 dout!("archived data file: {:?}→{:?}", item.src, item.dst);
-            },
+            }
             cpio::S_IFLNK => {
                 let tgt = fs::read_link(&item.src)?;
                 // XXX don't follow data symlinks to archive their targets
-                cpio::archive_symlink(
-                    cpio_state,
-                    &item.dst,
-                    &src_amd,
-                    &tgt,
-                    &mut cpio_writer
-                )?;
+                cpio::archive_symlink(cpio_state, &item.dst, &src_amd, &tgt, &mut cpio_writer)?;
                 dout!("archived data symlink: {:?}→{:?}", item.src, item.dst);
-            },
+            }
             _ => {
-                cpio::archive_path(
-                    cpio_state,
-                    &item.dst,
-                    &src_amd,
-                    &mut cpio_writer
-                )?;
+                cpio::archive_path(cpio_state, &item.dst, &src_amd, &mut cpio_writer)?;
                 dout!("archived data path: {:?}→{:?}", item.src, item.dst);
-            },
+            }
         };
     }
 
@@ -847,15 +814,15 @@ fn populate_default_symlinks<W: Seek + Write>(
     cpio_state: &mut cpio::ArchiveState,
     mut cpio_writer: W,
 ) -> io::Result<()> {
-    let amd = cpio::ArchiveMd{
-            nlink: 1,
-            mode: cpio::S_IFLNK | 0o777,
-            uid: 0,
-            gid: 0,
-            mtime: 0,
-            rmajor: 0,
-            rminor: 0,
-            len: 0,
+    let amd = cpio::ArchiveMd {
+        nlink: 1,
+        mode: cpio::S_IFLNK | 0o777,
+        uid: 0,
+        gid: 0,
+        mtime: 0,
+        rmajor: 0,
+        rminor: 0,
+        len: 0,
     };
 
     // on Tumbleweed, bash won't start without this symlink. /lib64 may already
@@ -927,7 +894,11 @@ fn args_usage(params: &[Argument]) {
     print!("{}", MANIFEST_FORMAT);
 }
 
-fn args_process_one(name: &str, value: Option<&str>, state: &mut ArgsState) -> argument::Result<()> {
+fn args_process_one(
+    name: &str,
+    value: Option<&str>,
+    state: &mut ArgsState,
+) -> argument::Result<()> {
     // unwrap: callers ensure value is Some if arg requires one
     match name {
         "output" => state.cpio_output_arg = Some(PathBuf::from(value.unwrap())),
@@ -935,22 +906,18 @@ fn args_process_one(name: &str, value: Option<&str>, state: &mut ArgsState) -> a
             // TODO: avoid to_string()
             match path_stat(&GatherEnt::Manifest(value.unwrap().to_string())) {
                 Err(e) => {
-                    return Err(
-                        argument::Error::InvalidValue {
-                            value: value.unwrap().to_string(),
-                            expected: format!("failed to stat: {:?}", e),
-                        }
-                    );
+                    return Err(argument::Error::InvalidValue {
+                        value: value.unwrap().to_string(),
+                        expected: format!("failed to stat: {:?}", e),
+                    });
                 }
                 Ok(fs) => {
                     match fs::OpenOptions::new().read(true).open(&fs.path) {
                         Err(e) => {
-                            return Err(
-                                argument::Error::InvalidValue {
-                                    value: value.unwrap().to_string(),
-                                    expected: format!("failed to open: {:?}", e),
-                                }
-                            );
+                            return Err(argument::Error::InvalidValue {
+                                value: value.unwrap().to_string(),
+                                expected: format!("failed to open: {:?}", e),
+                            });
                         }
                         Ok(f) => state.manifests.push(io::BufReader::new(f)),
                     };
@@ -966,13 +933,13 @@ fn args_process_one(name: &str, value: Option<&str>, state: &mut ArgsState) -> a
 fn args_process() -> argument::Result<ArgsState> {
     let mut state = ArgsState {
         cpio_output_arg: None,
-        manifests: vec!(),
+        manifests: vec![],
     };
     let params = &[
         Argument::value(
             "output",
             "INITRAMFS",
-            "Write initramfs archive to this file path."
+            "Write initramfs archive to this file path.",
         ),
         Argument::value(
             "manifest",
@@ -1000,7 +967,7 @@ fn args_process() -> argument::Result<ArgsState> {
 // args_out will always be Some(cpio_output_path) on success.
 fn cpio_out_open(
     args_out: &mut Option<PathBuf>,
-    conf: &HashMap<String, String>
+    conf: &HashMap<String, String>,
 ) -> io::Result<io::BufWriter<fs::File>> {
     let mut fops = fs::OpenOptions::new();
     // for rapido we normally want to truncate any existing output file
@@ -1027,7 +994,7 @@ fn cpio_out_open(
 }
 
 fn main() -> io::Result<()> {
-    let mut cpio_state = cpio::ArchiveState::new(cpio::ArchiveProperties{
+    let mut cpio_state = cpio::ArchiveState::new(cpio::ArchiveProperties {
         // Attempt 4K file data alignment within archive for Btrfs/XFS reflinks
         data_align: 4096,
         ..cpio::ArchiveProperties::default()
@@ -1038,9 +1005,7 @@ fn main() -> io::Result<()> {
         Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidInput, e.to_string())),
     };
 
-    let (conf, mut cpio_writer) = match rapido::host_rapido_conf_open(
-        rapido::RAPIDO_CONF_PATH
-    ) {
+    let (conf, mut cpio_writer) = match rapido::host_rapido_conf_open(rapido::RAPIDO_CONF_PATH) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             eprintln!("no rapido.conf, using defaults");
             let c = rapido::conf_defaults();
@@ -1050,7 +1015,7 @@ fn main() -> io::Result<()> {
                 &mut cpio_state,
                 &Path::new("/rapido.conf"),
                 &CPIO_AMD_DEFAULT,
-                &mut w
+                &mut w,
             )?;
             (c, w)
         }
@@ -1076,7 +1041,7 @@ fn main() -> io::Result<()> {
                 &Path::new("/rapido.conf"),
                 &cf_amd,
                 &mut cf_rd,
-                &mut w
+                &mut w,
             )?;
             (c, w)
         }
@@ -1092,7 +1057,7 @@ fn main() -> io::Result<()> {
         &mut paths_seen,
         &mut cpio_state,
         &mut cpio_writer,
-        &mut args_state.manifests
+        &mut args_state.manifests,
     )?;
 
     match fs::OpenOptions::new().read(true).open(RAPIDO_BASH_RC_PATH) {
@@ -1108,12 +1073,12 @@ fn main() -> io::Result<()> {
                 &Path::new("/rapido.rc"),
                 &f_amd,
                 &f,
-                &mut cpio_writer
+                &mut cpio_writer,
             )?;
         }
     };
 
-    let core_elfs = vec!(
+    let core_elfs = vec![
         // this will only install if /rdinit isn't already provided by manifest
         GatherEnt::NameDst(RAPIDO_INIT_PATH, Path::new("/rdinit")),
         // rapido-init core deps
@@ -1122,14 +1087,14 @@ fn main() -> io::Result<()> {
         GatherEnt::NameStatic("bash"),
         GatherEnt::NameStatic("stty"),
         // TODO only install if we have non-builtin kmods!
-        GatherEnt::NameStatic("modprobe")
-    );
+        GatherEnt::NameStatic("modprobe"),
+    ];
     gather_archive_elfs(
         core_elfs,
         &mut libs_seen,
         &mut paths_seen,
         &mut cpio_state,
-        &mut cpio_writer
+        &mut cpio_writer,
     )?;
 
     // TODO avoid stringify
@@ -1144,7 +1109,7 @@ fn main() -> io::Result<()> {
         false,
         &mut paths_seen,
         &mut cpio_state,
-        &mut cpio_writer
+        &mut cpio_writer,
     )?;
 
     populate_default_symlinks(&paths_seen, &mut cpio_state, &mut cpio_writer)?;
@@ -1162,10 +1127,7 @@ fn main() -> io::Result<()> {
 }
 
 // var replacement mostly copied from kv-conf
-fn sub_path_vars(
-    conf: &HashMap<String, String>,
-    p: &str
-) -> Result<String, &'static str> {
+fn sub_path_vars(conf: &HashMap<String, String>, p: &str) -> Result<String, &'static str> {
     // TODO: fastpath if no '$'
     let mut unquoted_val = String::new();
     let mut var_next = false;
@@ -1217,13 +1179,13 @@ fn manifest_name_sub(conf: &HashMap<String, String>, name: Option<&str>) -> io::
                 Err(io::Error::from(io::ErrorKind::InvalidData))
             }
             Ok(p) => Ok(p),
-        }
+        },
     }
 }
 
 fn manifest_name_sub_abs_path(
     conf: &HashMap<String, String>,
-    name: Option<&str>
+    name: Option<&str>,
 ) -> io::Result<PathBuf> {
     let p = manifest_name_sub(conf, name)?;
     match path::absolute(p) {
@@ -1241,21 +1203,18 @@ fn manifest_dir<W: Seek + Write>(
     paths_seen: &mut HashSet<PathBuf>,
     cpio_state: &mut cpio::ArchiveState,
     mut cpio_writer: W,
-    name: Option<&str>
+    name: Option<&str>,
 ) -> io::Result<()> {
     let p = manifest_name_sub_abs_path(conf, name)?;
     if paths_seen.contains(&p) {
         dout!("ignoring seen dir: {:?}", &p);
         return Ok(());
     }
-    let amd = cpio::ArchiveMd { mode: cpio::S_IFDIR | 0o755, ..CPIO_AMD_DEFAULT };
-    gather_archive_dirs(
-        p.parent(),
-        &amd,
-        paths_seen,
-        cpio_state,
-        &mut cpio_writer
-    )?;
+    let amd = cpio::ArchiveMd {
+        mode: cpio::S_IFDIR | 0o755,
+        ..CPIO_AMD_DEFAULT
+    };
+    gather_archive_dirs(p.parent(), &amd, paths_seen, cpio_state, &mut cpio_writer)?;
     cpio::archive_path(cpio_state, &p, &amd, &mut cpio_writer)?;
     paths_seen.insert(p);
     Ok(())
@@ -1267,7 +1226,7 @@ fn manifest_slink<W: Seek + Write>(
     cpio_state: &mut cpio::ArchiveState,
     mut cpio_writer: W,
     name: Option<&str>,
-    slink_tgt: Option<&str>
+    slink_tgt: Option<&str>,
 ) -> io::Result<()> {
     let p = manifest_name_sub_abs_path(conf, name)?;
     if paths_seen.contains(&p) {
@@ -1275,14 +1234,11 @@ fn manifest_slink<W: Seek + Write>(
         return Ok(());
     }
     let tgt = manifest_name_sub(conf, slink_tgt)?;
-    let amd = cpio::ArchiveMd { mode: cpio::S_IFLNK | 0o777, ..CPIO_AMD_DEFAULT };
-    gather_archive_dirs(
-        p.parent(),
-        &amd,
-        paths_seen,
-        cpio_state,
-        &mut cpio_writer
-    )?;
+    let amd = cpio::ArchiveMd {
+        mode: cpio::S_IFLNK | 0o777,
+        ..CPIO_AMD_DEFAULT
+    };
+    gather_archive_dirs(p.parent(), &amd, paths_seen, cpio_state, &mut cpio_writer)?;
     cpio::archive_symlink(cpio_state, &p, &amd, Path::new(&tgt), &mut cpio_writer)?;
     paths_seen.insert(p);
     Ok(())
@@ -1294,7 +1250,7 @@ fn manifest_file<W: Seek + Write>(
     cpio_state: &mut cpio::ArchiveState,
     mut cpio_writer: W,
     name: Option<&str>,
-    src: Option<&str>
+    src: Option<&str>,
 ) -> io::Result<()> {
     let p = manifest_name_sub_abs_path(conf, name)?;
     if paths_seen.contains(&p) {
@@ -1307,23 +1263,11 @@ fn manifest_file<W: Seek + Write>(
         let src_md = f.metadata()?;
         // XXX unlike others, amd is based on the src file.
         let amd = cpio::ArchiveMd::from(cpio_state, &src_md)?;
-        gather_archive_dirs(
-            p.parent(),
-            &amd,
-            paths_seen,
-            cpio_state,
-            &mut cpio_writer
-        )?;
+        gather_archive_dirs(p.parent(), &amd, paths_seen, cpio_state, &mut cpio_writer)?;
         cpio::archive_file(cpio_state, &p, &amd, &f, &mut cpio_writer)?;
     } else {
         let amd = CPIO_AMD_DEFAULT;
-        gather_archive_dirs(
-            p.parent(),
-            &amd,
-            paths_seen,
-            cpio_state,
-            &mut cpio_writer
-        )?;
+        gather_archive_dirs(p.parent(), &amd, paths_seen, cpio_state, &mut cpio_writer)?;
         cpio::archive_path(cpio_state, &p, &amd, &mut cpio_writer)?;
     }
 
@@ -1337,7 +1281,7 @@ fn manifest_autorun<W: Seek + Write>(
     autorun_idx: &mut u32,
     cpio_state: &mut cpio::ArchiveState,
     mut cpio_writer: W,
-    name: Option<&str>
+    name: Option<&str>,
 ) -> io::Result<()> {
     let src = manifest_name_sub_abs_path(conf, name)?;
     let dst = match src.file_name() {
@@ -1378,7 +1322,7 @@ fn manifest_tree<W: Seek + Write>(
     cpio_state: &mut cpio::ArchiveState,
     mut cpio_writer: W,
     name: Option<&str>,
-    src: Option<&str>
+    src: Option<&str>,
 ) -> io::Result<()> {
     let dst = manifest_name_sub_abs_path(conf, name)?;
     if !dst.is_absolute() {
@@ -1387,10 +1331,14 @@ fn manifest_tree<W: Seek + Write>(
     }
     let src = manifest_name_sub(conf, src)?;
     gather_archive_data(
-        vec!(GatherItem { src: PathBuf::from(src), dst, flags: 0, }),
+        vec![GatherItem {
+            src: PathBuf::from(src),
+            dst,
+            flags: 0,
+        }],
         paths_seen,
         cpio_state,
-        &mut cpio_writer
+        &mut cpio_writer,
     )
 }
 
@@ -1403,7 +1351,7 @@ fn manifest_parse_one<W: Seek + Write>(
     cpio_state: &mut cpio::ArchiveState,
     mut cpio_writer: W,
     line: &mut String,
-    fests: &mut Vec<io::BufReader<fs::File>>
+    fests: &mut Vec<io::BufReader<fs::File>>,
 ) -> io::Result<()> {
     let mut iter = line.split_whitespace();
     let etype = match iter.next() {
@@ -1413,24 +1361,15 @@ fn manifest_parse_one<W: Seek + Write>(
     };
 
     match etype {
-        "dir" => {
-            manifest_dir(conf,
-                paths_seen,
-                cpio_state,
-                cpio_writer,
-                iter.next()
-            )
-        }
-        "slink" => {
-            manifest_slink(
-                conf,
-                paths_seen,
-                cpio_state,
-                cpio_writer,
-                iter.next(),
-                iter.next()
-            )
-        }
+        "dir" => manifest_dir(conf, paths_seen, cpio_state, cpio_writer, iter.next()),
+        "slink" => manifest_slink(
+            conf,
+            paths_seen,
+            cpio_state,
+            cpio_writer,
+            iter.next(),
+            iter.next(),
+        ),
         "include" => {
             let p = manifest_name_sub(conf, iter.next())?;
             // should we skip already-seen manifests completely?
@@ -1439,16 +1378,14 @@ fn manifest_parse_one<W: Seek + Write>(
             fests.push(io::BufReader::new(f));
             Ok(())
         }
-        "file" => {
-            manifest_file(
-                conf,
-                paths_seen,
-                cpio_state,
-                cpio_writer,
-                iter.next(),
-                iter.next()
-            )
-        }
+        "file" => manifest_file(
+            conf,
+            paths_seen,
+            cpio_state,
+            cpio_writer,
+            iter.next(),
+            iter.next(),
+        ),
         // bin <name>
         // <name> is used for source and archive destination path.
         // <name> paths not containing a '/' are searched for under BIN_PATHS,
@@ -1461,39 +1398,35 @@ fn manifest_parse_one<W: Seek + Write>(
         "bin" => {
             let src = manifest_name_sub(conf, iter.next())?;
             gather_archive_elfs(
-                vec!(GatherEnt::Name(src)),
+                vec![GatherEnt::Name(src)],
                 libs_seen,
                 paths_seen,
                 cpio_state,
-                cpio_writer
+                cpio_writer,
             )
         }
         "try-bin" => {
             let src = manifest_name_sub(conf, iter.next())?;
             gather_archive_elfs(
-                vec!(GatherEnt::NameTry(src)),
+                vec![GatherEnt::NameTry(src)],
                 libs_seen,
                 paths_seen,
                 cpio_state,
-                cpio_writer
+                cpio_writer,
             )
         }
-        "kmod" => {
-            match iter.next() {
-                None => Err(io::Error::from(io::ErrorKind::InvalidData)),
-                Some(kmod) => {
-                    gather_archive_kmods(
-                        conf,
-                        gk,
-                        &mut vec!(kmod.to_string()),
-                        false,
-                        paths_seen,
-                        cpio_state,
-                        cpio_writer
-                    )
-                }
-            }
-        }
+        "kmod" => match iter.next() {
+            None => Err(io::Error::from(io::ErrorKind::InvalidData)),
+            Some(kmod) => gather_archive_kmods(
+                conf,
+                gk,
+                &mut vec![kmod.to_string()],
+                false,
+                paths_seen,
+                cpio_state,
+                cpio_writer,
+            ),
+        },
         "try-kmod" => {
             match iter.next() {
                 None => Err(io::Error::from(io::ErrorKind::InvalidData)),
@@ -1501,12 +1434,12 @@ fn manifest_parse_one<W: Seek + Write>(
                     gather_archive_kmods(
                         conf,
                         gk,
-                        &mut vec!(kmod.to_string()),
+                        &mut vec![kmod.to_string()],
                         // ignore_missing:
                         true,
                         paths_seen,
                         cpio_state,
-                        cpio_writer
+                        cpio_writer,
                     )
                 }
             }
@@ -1521,7 +1454,7 @@ fn manifest_parse_one<W: Seek + Write>(
                     autorun_idx,
                     cpio_state,
                     &mut cpio_writer,
-                    Some(autorun_path)
+                    Some(autorun_path),
                 )?;
             }
             match autorun_idx_before == *autorun_idx {
@@ -1529,16 +1462,14 @@ fn manifest_parse_one<W: Seek + Write>(
                 false => Ok(()),
             }
         }
-        "tree" => {
-            manifest_tree(
-                conf,
-                paths_seen,
-                cpio_state,
-                cpio_writer,
-                iter.next(),
-                iter.next()
-            )
-        }
+        "tree" => manifest_tree(
+            conf,
+            paths_seen,
+            cpio_state,
+            cpio_writer,
+            iter.next(),
+            iter.next(),
+        ),
         "filter" => {
             let p = manifest_name_sub_abs_path(conf, iter.next())?;
             paths_seen.insert(p);
@@ -1591,7 +1522,7 @@ fn manifest_parse<W: Seek + Write>(
                 fests.pop();
                 continue;
             }
-            Ok(_) => {},
+            Ok(_) => {}
         }
 
         if let Err(e) = manifest_parse_one(
@@ -1603,7 +1534,7 @@ fn manifest_parse<W: Seek + Write>(
             cpio_state,
             &mut cpio_out,
             &mut lbuf,
-            fests
+            fests,
         ) {
             eprintln!("failed to parse manifest line: {}", lbuf);
             return Err(e);
@@ -1615,8 +1546,8 @@ fn manifest_parse<W: Seek + Write>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Read;
     use std::ffi::OsString;
+    use std::io::Read;
     use std::os::unix::fs::OpenOptionsExt;
 
     struct TempDir {
@@ -1627,12 +1558,18 @@ mod tests {
         pub fn new() -> TempDir {
             let mut b = [0u8; 16];
             let mut dirname = String::from("test-rapido-cut-");
-            fs::File::open("/dev/urandom").unwrap().read_exact(&mut b).unwrap();
+            fs::File::open("/dev/urandom")
+                .unwrap()
+                .read_exact(&mut b)
+                .unwrap();
             for i in &b {
                 dirname.push_str(&format!("{:02x}", i));
             }
             fs::create_dir(&dirname).unwrap();
-            TempDir { dir: PathBuf::from(&dirname), dirname }
+            TempDir {
+                dir: PathBuf::from(&dirname),
+                dirname,
+            }
         }
     }
 
@@ -1652,7 +1589,7 @@ mod tests {
         let mut libs_seen: HashSet<String> = HashSet::new();
         let mut paths_seen: HashSet<PathBuf> = HashSet::new();
         let mut gk: Option<GatherKmods> = None;
-        let mut fests = vec!(fest_rdr);
+        let mut fests = vec![fest_rdr];
         manifest_parse(
             conf,
             &mut gk,
@@ -1674,22 +1611,20 @@ mod tests {
         let basefest = format!("{}/base.fest", td.dirname);
         fs::write(
             &basefest,
-            format!("dir /basefirst\ninclude {}\ndir /baseafter", ifest)
-        ).unwrap();
+            format!("dir /basefirst\ninclude {}\ndir /baseafter", ifest),
+        )
+        .unwrap();
 
-        let props = cpio::ArchiveProperties{
+        let props = cpio::ArchiveProperties {
             data_align: 4096,
             ..cpio::ArchiveProperties::default()
         };
         let mut cpio_state = cpio::ArchiveState::new(props);
         let mut cpio_out = io::Cursor::new(Vec::new());
 
-        let rdr = io::BufReader::new(
-            fs::OpenOptions::new().read(true).open(&basefest).unwrap()
-        );
+        let rdr = io::BufReader::new(fs::OpenOptions::new().read(true).open(&basefest).unwrap());
 
-        test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr)
-            .expect("bad manifest");
+        test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr).expect("bad manifest");
 
         cpio_out.seek(io::SeekFrom::Start(0)).unwrap();
         let mut aw = cpio::archive_walk(cpio_out).unwrap();
@@ -1709,18 +1644,15 @@ mod tests {
         let fest = format!("{}/test.fest", td.dirname);
         fs::write(&fest, "dir /a\nslink /b /a").unwrap();
 
-        let props = cpio::ArchiveProperties{
+        let props = cpio::ArchiveProperties {
             data_align: 4096,
             ..cpio::ArchiveProperties::default()
         };
         let mut cpio_state = cpio::ArchiveState::new(props);
         let mut cpio_out = io::Cursor::new(Vec::new());
 
-        let rdr = io::BufReader::new(
-            fs::OpenOptions::new().read(true).open(&fest).unwrap()
-        );
-        test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr)
-            .expect("bad manifest");
+        let rdr = io::BufReader::new(fs::OpenOptions::new().read(true).open(&fest).unwrap());
+        test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr).expect("bad manifest");
 
         cpio_out.seek(io::SeekFrom::Start(0)).unwrap();
         let mut aw = cpio::archive_walk(cpio_out).unwrap();
@@ -1744,18 +1676,15 @@ mod tests {
         let fest = format!("{}/test.fest", td.dirname);
         fs::write(&fest, "dir /a${KEY1}x\nslink /${KEY2} /a${KEY1}x").unwrap();
 
-        let props = cpio::ArchiveProperties{
+        let props = cpio::ArchiveProperties {
             data_align: 4096,
             ..cpio::ArchiveProperties::default()
         };
         let mut cpio_state = cpio::ArchiveState::new(props);
         let mut cpio_out = io::Cursor::new(Vec::new());
 
-        let rdr = io::BufReader::new(
-            fs::OpenOptions::new().read(true).open(&fest).unwrap()
-        );
-        test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr)
-            .expect("bad manifest");
+        let rdr = io::BufReader::new(fs::OpenOptions::new().read(true).open(&fest).unwrap());
+        test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr).expect("bad manifest");
 
         cpio_out.seek(io::SeekFrom::Start(0)).unwrap();
         let mut aw = cpio::archive_walk(cpio_out).unwrap();
@@ -1766,7 +1695,7 @@ mod tests {
         let ae = aw.next().unwrap().unwrap();
         assert_eq!(ae.name_str(), "VAL2");
         assert_eq!(ae.md.mode & cpio::S_IFMT, cpio::S_IFLNK);
-        assert_eq!(ae.md.len, 7);   // /aVAL1x
+        assert_eq!(ae.md.len, 7); // /aVAL1x
     }
 
     #[test]
@@ -1779,18 +1708,15 @@ mod tests {
         let fest = format!("{}/test.fest", td.dirname);
         fs::write(&fest, format!("file /a/b {}\nfile /c", file)).unwrap();
 
-        let props = cpio::ArchiveProperties{
+        let props = cpio::ArchiveProperties {
             data_align: 4096,
             ..cpio::ArchiveProperties::default()
         };
         let mut cpio_state = cpio::ArchiveState::new(props);
         let mut cpio_out = io::Cursor::new(Vec::new());
 
-        let rdr = io::BufReader::new(
-            fs::OpenOptions::new().read(true).open(&fest).unwrap()
-        );
-        test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr)
-            .expect("bad manifest");
+        let rdr = io::BufReader::new(fs::OpenOptions::new().read(true).open(&fest).unwrap());
+        test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr).expect("bad manifest");
 
         cpio_out.seek(io::SeekFrom::Start(0)).unwrap();
         let mut aw = cpio::archive_walk(cpio_out).unwrap();
@@ -1817,18 +1743,15 @@ mod tests {
         // unlike "bin", "try-bin" ignores missing files
         fs::write(&fest, "bin bash\ntry-bin th1s-doe5-not-ex1st").unwrap();
 
-        let props = cpio::ArchiveProperties{
+        let props = cpio::ArchiveProperties {
             data_align: 4096,
             ..cpio::ArchiveProperties::default()
         };
         let mut cpio_state = cpio::ArchiveState::new(props);
         let mut cpio_out = io::Cursor::new(Vec::new());
 
-        let rdr = io::BufReader::new(
-            fs::OpenOptions::new().read(true).open(&fest).unwrap()
-        );
-        test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr)
-            .expect("bad manifest");
+        let rdr = io::BufReader::new(fs::OpenOptions::new().read(true).open(&fest).unwrap());
+        test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr).expect("bad manifest");
 
         cpio_out.seek(io::SeekFrom::Start(0)).unwrap();
         let mut aw = cpio::archive_walk(cpio_out).unwrap();
@@ -1861,12 +1784,12 @@ mod tests {
 
         // copy bash into our directory tree
         let src = path_stat(&GatherEnt::NameStatic("bash")).unwrap();
-        let mut inf = fs::OpenOptions::new().read(true).open(&src.path)
-            .unwrap();
+        let mut inf = fs::OpenOptions::new().read(true).open(&src.path).unwrap();
         let mut outf_ops = fs::OpenOptions::new();
         // need to set exec mode to trigger ELF parsing...
         outf_ops.write(true).create(true).mode(0o777);
-        let mut outf = outf_ops.open(&format!("{}/this/is/bash", td.dirname))
+        let mut outf = outf_ops
+            .open(&format!("{}/this/is/bash", td.dirname))
             .unwrap();
         io::copy(&mut inf, &mut outf).expect("copy failed");
 
@@ -1879,18 +1802,15 @@ mod tests {
         // TODO: fix this by using a bin-tree manifest directive instead?
         fs::write(&fest, format!("bin ./{}", td.dirname)).unwrap();
 
-        let props = cpio::ArchiveProperties{
+        let props = cpio::ArchiveProperties {
             data_align: 4096,
             ..cpio::ArchiveProperties::default()
         };
         let mut cpio_state = cpio::ArchiveState::new(props);
         let mut cpio_out = io::Cursor::new(Vec::new());
 
-        let rdr = io::BufReader::new(
-            fs::OpenOptions::new().read(true).open(&fest).unwrap()
-        );
-        test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr)
-            .expect("bad manifest");
+        let rdr = io::BufReader::new(fs::OpenOptions::new().read(true).open(&fest).unwrap());
+        test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr).expect("bad manifest");
 
         cpio_out.seek(io::SeekFrom::Start(0)).unwrap();
         let mut aw = cpio::archive_walk(cpio_out).unwrap();
@@ -1902,7 +1822,7 @@ mod tests {
         // + bash ELF dependencies
         //
         // check for files only
-        let mut got_files: Vec<OsString> = vec!();
+        let mut got_files: Vec<OsString> = vec![];
 
         while let Some(ae) = aw.next() {
             assert!(ae.is_ok());
@@ -1912,8 +1832,8 @@ mod tests {
                 cpio::S_IFREG | cpio::S_IFLNK => {
                     let p = Path::new(an).file_name().unwrap().to_os_string();
                     got_files.push(p);
-                },
-                _ => {},
+                }
+                _ => {}
             };
         }
 
@@ -1921,21 +1841,30 @@ mod tests {
             OsString::from("file"),
             OsString::from("bash"),
             OsString::from("test.fest"),
-        ].iter().for_each(
-            |e| assert!(
-                got_files.contains(&e), "{:?} missing from {:?}", e, got_files
+        ]
+        .iter()
+        .for_each(|e| {
+            assert!(
+                got_files.contains(&e),
+                "{:?} missing from {:?}",
+                e,
+                got_files
             )
-        );
-        deps.iter().filter_map(|e| match e {
-            GatherEnt::LibRunPath(n, _) => Some(OsString::from(n)),
-            GatherEnt::Lib(n) => Some(OsString::from(n)),
-            _ => panic!("got non lib in ELF deps"),
-        })
-        .for_each(
-            |e| assert!(
-                got_files.contains(&e), "{:?} missing from {:?}", e, got_files
-            )
-        );
+        });
+        deps.iter()
+            .filter_map(|e| match e {
+                GatherEnt::LibRunPath(n, _) => Some(OsString::from(n)),
+                GatherEnt::Lib(n) => Some(OsString::from(n)),
+                _ => panic!("got non lib in ELF deps"),
+            })
+            .for_each(|e| {
+                assert!(
+                    got_files.contains(&e),
+                    "{:?} missing from {:?}",
+                    e,
+                    got_files
+                )
+            });
     }
 
     // based on test_kmod_context_full_load()
@@ -1952,27 +1881,32 @@ mod tests {
             concat!(
                 "kernel/mod_a.ko: kernel/mod_b.ko.xz kernel/mod_c.ko\n",
                 "kernel/mod_b.ko.xz:\n"
-            )
-        ).unwrap();
+            ),
+        )
+        .unwrap();
         fs::write(
             &format!("{kmods_root}/modules.softdep"),
-            "softdep mod_a pre: mod_d post: mod_e mod_f\n"
-        ).unwrap();
+            "softdep mod_a pre: mod_d post: mod_e mod_f\n",
+        )
+        .unwrap();
         fs::write(
             &format!("{kmods_root}/modules.weakdep"),
             concat!(
                 "weakdep mod_a mod_g\nweakdep mod_a mod_h\n",
                 "weakdep mod_b mod_i\nweakdep mod_b mod_j\n"
-            )
-        ).unwrap();
+            ),
+        )
+        .unwrap();
         fs::write(
             &format!("{kmods_root}/modules.builtin"),
-            "kernel/mod_builtin.ko\n"
-        ).unwrap();
+            "kernel/mod_builtin.ko\n",
+        )
+        .unwrap();
         fs::write(
             &format!("{kmods_root}/modules.alias"),
-            "alias alias_for_b mod_b\nalias mod-b mod_b\nalias mod-intel-b mod_b\n"
-        ).unwrap();
+            "alias alias_for_b mod_b\nalias mod-b mod_b\nalias mod-intel-b mod_b\n",
+        )
+        .unwrap();
     }
 
     #[test]
@@ -1980,7 +1914,10 @@ mod tests {
         let td = TempDir::new();
 
         let conf = HashMap::from([
-            ("KERNEL_INSTALL_MOD_PATH".to_string(), format!("{}/mods", td.dirname)),
+            (
+                "KERNEL_INSTALL_MOD_PATH".to_string(),
+                format!("{}/mods", td.dirname),
+            ),
             ("KERNEL_RELEASE".to_string(), "6.66".to_string()),
         ]);
 
@@ -1990,18 +1927,15 @@ mod tests {
         let fest = format!("{}/test.fest", td.dirname);
         fs::write(&fest, "kmod mod_a\nkmod mod-builtin\ntry-kmod mod-no").unwrap();
 
-        let props = cpio::ArchiveProperties{
+        let props = cpio::ArchiveProperties {
             data_align: 4096,
             ..cpio::ArchiveProperties::default()
         };
         let mut cpio_state = cpio::ArchiveState::new(props);
         let mut cpio_out = io::Cursor::new(Vec::new());
 
-        let rdr = io::BufReader::new(
-            fs::OpenOptions::new().read(true).open(&fest).unwrap()
-        );
-        test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr)
-            .expect("bad manifest");
+        let rdr = io::BufReader::new(fs::OpenOptions::new().read(true).open(&fest).unwrap());
+        test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr).expect("bad manifest");
 
         cpio_out.seek(io::SeekFrom::Start(0)).unwrap();
         let mut aw = cpio::archive_walk(cpio_out).unwrap();
@@ -2052,8 +1986,9 @@ mod tests {
         let inc_fest = format!("{}/included.fest", td.dirname);
         fs::write(
             &inc_fest,
-            format!("autorun {} {}\n", inc_autorun, last_autorun)
-        ).unwrap();
+            format!("autorun {} {}\n", inc_autorun, last_autorun),
+        )
+        .unwrap();
 
         let autorun = format!("{}/autorun.sh", td.dirname);
         fs::write(&autorun, "echo first\n").unwrap();
@@ -2061,21 +1996,19 @@ mod tests {
         let fest = format!("{}/test.fest", td.dirname);
         fs::write(
             &fest,
-            format!("autorun {}\ninclude {}\ndir /baseafter", autorun, inc_fest)
-        ).unwrap();
+            format!("autorun {}\ninclude {}\ndir /baseafter", autorun, inc_fest),
+        )
+        .unwrap();
 
-        let props = cpio::ArchiveProperties{
+        let props = cpio::ArchiveProperties {
             data_align: 4096,
             ..cpio::ArchiveProperties::default()
         };
         let mut cpio_state = cpio::ArchiveState::new(props);
         let mut cpio_out = io::Cursor::new(Vec::new());
 
-        let rdr = io::BufReader::new(
-            fs::OpenOptions::new().read(true).open(&fest).unwrap()
-        );
-        test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr)
-            .expect("bad manifest");
+        let rdr = io::BufReader::new(fs::OpenOptions::new().read(true).open(&fest).unwrap());
+        test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr).expect("bad manifest");
 
         cpio_out.seek(io::SeekFrom::Start(0)).unwrap();
         let mut aw = cpio::archive_walk(cpio_out).unwrap();
@@ -2127,23 +2060,20 @@ mod tests {
         let fest = format!("{}/test.fest", td.dirname);
         fs::write(&fest, format!("tree / {}", td.dirname)).unwrap();
 
-        let props = cpio::ArchiveProperties{
+        let props = cpio::ArchiveProperties {
             data_align: 4096,
             ..cpio::ArchiveProperties::default()
         };
         let mut cpio_state = cpio::ArchiveState::new(props);
         let mut cpio_out = io::Cursor::new(Vec::new());
 
-        let rdr = io::BufReader::new(
-            fs::OpenOptions::new().read(true).open(&fest).unwrap()
-        );
-        test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr)
-            .expect("bad manifest");
+        let rdr = io::BufReader::new(fs::OpenOptions::new().read(true).open(&fest).unwrap());
+        test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr).expect("bad manifest");
 
         cpio_out.seek(io::SeekFrom::Start(0)).unwrap();
         let mut aw = cpio::archive_walk(cpio_out).unwrap();
 
-        let mut got_paths: Vec<String> = vec!();
+        let mut got_paths: Vec<String> = vec![];
 
         while let Some(ae) = aw.next() {
             assert!(ae.is_ok());
@@ -2177,11 +2107,9 @@ mod tests {
 
         let fest = format!("{}/test.fest", td.dirname);
         fs::write(&fest, format!("bin bash\ntree / {}", td.dirname)).unwrap();
-        let rdr = io::BufReader::new(
-            fs::OpenOptions::new().read(true).open(&fest).unwrap()
-        );
+        let rdr = io::BufReader::new(fs::OpenOptions::new().read(true).open(&fest).unwrap());
 
-        let props = cpio::ArchiveProperties{
+        let props = cpio::ArchiveProperties {
             data_align: 4096,
             ..cpio::ArchiveProperties::default()
         };
@@ -2197,8 +2125,9 @@ mod tests {
             &mut paths_seen,
             &mut cpio_state,
             &mut cpio_out,
-            &mut vec!(rdr),
-        ).expect("bad manifest");
+            &mut vec![rdr],
+        )
+        .expect("bad manifest");
 
         cpio_out.seek(io::SeekFrom::Start(0)).unwrap();
         let mut aw = cpio::archive_walk(cpio_out).unwrap();
@@ -2216,7 +2145,10 @@ mod tests {
             assert_eq!(
                 paths_seen.contains(&p),
                 true,
-                "{:?} missing from paths_seen: {:?}", p, paths_seen);
+                "{:?} missing from paths_seen: {:?}",
+                p,
+                paths_seen
+            );
         }
     }
 
@@ -2229,14 +2161,17 @@ mod tests {
         fs::create_dir_all(&format!("{}/this/isnt/filtered", td.dirname)).unwrap();
 
         let fest = format!("{}/test.fest", td.dirname);
-        fs::write(&fest,
-            format!("filter /this/is\nfilter /this/filter\ntree / {}", td.dirname)
-        ).unwrap();
-        let rdr = io::BufReader::new(
-            fs::OpenOptions::new().read(true).open(&fest).unwrap()
-        );
+        fs::write(
+            &fest,
+            format!(
+                "filter /this/is\nfilter /this/filter\ntree / {}",
+                td.dirname
+            ),
+        )
+        .unwrap();
+        let rdr = io::BufReader::new(fs::OpenOptions::new().read(true).open(&fest).unwrap());
 
-        let props = cpio::ArchiveProperties{
+        let props = cpio::ArchiveProperties {
             data_align: 4096,
             ..cpio::ArchiveProperties::default()
         };
@@ -2252,13 +2187,14 @@ mod tests {
             &mut paths_seen,
             &mut cpio_state,
             &mut cpio_out,
-            &mut vec!(rdr),
-        ).expect("bad manifest");
+            &mut vec![rdr],
+        )
+        .expect("bad manifest");
 
         cpio_out.seek(io::SeekFrom::Start(0)).unwrap();
         let mut aw = cpio::archive_walk(cpio_out).unwrap();
 
-        let mut got_paths: Vec<String> = vec!();
+        let mut got_paths: Vec<String> = vec![];
         while let Some(ae) = aw.next() {
             assert!(ae.is_ok());
             let ae = ae.unwrap();
@@ -2287,18 +2223,15 @@ mod tests {
         let fest = format!("{}/test.fest", td.dirname);
         fs::write(&fest, format!("file /a/b/.././b/../b/c {}", file)).unwrap();
 
-        let props = cpio::ArchiveProperties{
+        let props = cpio::ArchiveProperties {
             data_align: 4096,
             ..cpio::ArchiveProperties::default()
         };
         let mut cpio_state = cpio::ArchiveState::new(props);
         let mut cpio_out = io::Cursor::new(Vec::new());
 
-        let rdr = io::BufReader::new(
-            fs::OpenOptions::new().read(true).open(&fest).unwrap()
-        );
-        test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr)
-            .expect("bad manifest");
+        let rdr = io::BufReader::new(fs::OpenOptions::new().read(true).open(&fest).unwrap());
+        test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr).expect("bad manifest");
 
         cpio_out.seek(io::SeekFrom::Start(0)).unwrap();
         let mut aw = cpio::archive_walk(cpio_out).unwrap();
@@ -2324,16 +2257,14 @@ mod tests {
         let fest = format!("{}/test.fest", td.dirname);
         fs::write(&fest, format!("file /a/b/.././../../below")).unwrap();
 
-        let props = cpio::ArchiveProperties{
+        let props = cpio::ArchiveProperties {
             data_align: 4096,
             ..cpio::ArchiveProperties::default()
         };
         let mut cpio_state = cpio::ArchiveState::new(props);
         let mut cpio_out = io::Cursor::new(Vec::new());
 
-        let rdr = io::BufReader::new(
-            fs::OpenOptions::new().read(true).open(&fest).unwrap()
-        );
+        let rdr = io::BufReader::new(fs::OpenOptions::new().read(true).open(&fest).unwrap());
         let e = test_manifest_parse(&conf, &mut cpio_state, &mut cpio_out, rdr);
         assert_eq!(e.is_err(), true);
         assert_eq!(e.unwrap_err().kind(), io::ErrorKind::InvalidInput);

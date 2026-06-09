@@ -21,12 +21,12 @@ _fstests_devs_provision() {
 	declare -A _CFG=(["SCRATCH_DEV"]="" ["SCRATCH_LOGDEV"]="" \
 			 ["SCRATCH_RTDEV"]="" ["TEST_DEV"]="")
 
-	for i in $(ls /sys/block); do
-		_ser="$(cat /sys/block/${i}/serial 2>/dev/null)" ||
-		    _ser="$(cat /sys/block/${i}/device/serial 2>/dev/null)" ||
+	for i in /sys/block/*; do
+		_ser="$(cat ${i}/serial 2>/dev/null)" ||
+		    _ser="$(cat ${i}/device/serial 2>/dev/null)" ||
 		    continue
 		ser="${_ser// }"
-		[[ -v "_CFG[$ser]" ]] && _CFG[$ser]="/dev/${i}"
+		[[ -v "_CFG[$ser]" ]] && _CFG[$ser]="/dev/${i##*/}"
 	done
 
 	[ -b "${_CFG[TEST_DEV]}" ] || _fstests_devs_zram_setup TEST_DEV
@@ -54,12 +54,12 @@ _fstests_devs_pool_provision() {
 			 ["TEST_DEV"]="")
 	declare -a _POOL=()
 
-	for i in $(ls /sys/block); do
-		_ser="$(cat /sys/block/${i}/serial 2>/dev/null)" ||
-		    _ser="$(cat /sys/block/${i}/device/serial 2>/dev/null)" ||
+	for i in /sys/block/*; do
+		_ser="$(cat ${i}/serial 2>/dev/null)" ||
+		    _ser="$(cat ${i}/device/serial 2>/dev/null)" ||
 		    continue
 		ser="${_ser// }"
-		devp="/dev/${i}"
+		devp="/dev/${i##*/}"
 		[[ -v "_CFG[$ser]" ]] && _CFG[$ser]="$devp"
 		[[ $ser == "SCRATCH_DEV"* && -b "$devp" ]] && _POOL+=("$devp")
 	done

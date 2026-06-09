@@ -39,9 +39,14 @@ fn vm_mac_gen(vm_num: u64, vm_tap: &str) -> String {
     hasher.write_u64(vm_num);
     hasher.write(vm_tap.as_bytes());
     let h: u64 = hasher.finish();
-    format!("b8:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-        h & 0xff, (h >> 8) & 0xff, (h >> 16) & 0xff, (h >> 24) & 0xff,
-        (h >> 32) & 0xff)
+    format!(
+        "b8:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+        h & 0xff,
+        (h >> 8) & 0xff,
+        (h >> 16) & 0xff,
+        (h >> 24) & 0xff,
+        (h >> 32) & 0xff
+    )
 }
 
 struct VmResources {
@@ -58,8 +63,8 @@ fn vm_resource_line_process(line: &[u8], rscs: &mut VmResources) -> io::Result<b
     match line {
         // vim compiled from string via: s/\(.\)/b'\1', /g
         // rapido-rsc/cpu/
-        [b'r', b'a', b'p', b'i', b'd', b'o', b'-', b'r', b's', b'c', b'/',
-         b'c', b'p', b'u', b'/', val @ ..] => {
+        [b'r', b'a', b'p', b'i', b'd', b'o', b'-', b'r', b's', b'c', b'/', b'c', b'p', b'u', b'/', val @ ..] =>
+        {
             rscs.cpus = match str::from_utf8(val) {
                 Ok(s) => match s.parse::<u32>() {
                     Err(_) => Err(io::Error::from(io::ErrorKind::InvalidData)),
@@ -69,38 +74,30 @@ fn vm_resource_line_process(line: &[u8], rscs: &mut VmResources) -> io::Result<b
             }?;
         }
         // rapido-rsc/mem/
-        [b'r', b'a', b'p', b'i', b'd', b'o', b'-', b'r', b's', b'c', b'/',
-         b'm', b'e', b'm', b'/', val @ ..] => {
+        [b'r', b'a', b'p', b'i', b'd', b'o', b'-', b'r', b's', b'c', b'/', b'm', b'e', b'm', b'/', val @ ..] =>
+        {
             rscs.mem = match str::from_utf8(val) {
                 Err(_) => Err(io::Error::from(io::ErrorKind::InvalidData)),
-                Ok(s) => {
-                    match s.rsplit_once(['m', 'M', 'g', 'G']) {
-                        None if s.parse::<u64>().is_ok() => Ok(s.to_string()),
-                        Some((n, u)) if n.parse::<u64>().is_ok() && u == "" => {
-                            Ok(s.to_string())
-                        },
-                        None | Some((_, _)) => {
-                            Err(io::Error::from(io::ErrorKind::InvalidData))
-                        },
-                    }
+                Ok(s) => match s.rsplit_once(['m', 'M', 'g', 'G']) {
+                    None if s.parse::<u64>().is_ok() => Ok(s.to_string()),
+                    Some((n, u)) if n.parse::<u64>().is_ok() && u == "" => Ok(s.to_string()),
+                    None | Some((_, _)) => Err(io::Error::from(io::ErrorKind::InvalidData)),
                 },
             }?;
-        },
+        }
         // rapido-rsc/qemu/custom_args
-        [b'r', b'a', b'p', b'i', b'd', b'o', b'-', b'r', b's', b'c', b'/',
-         b'q', b'e', b'm', b'u', b'/',
-         b'c', b'u', b's', b't', b'o', b'm', b'_', b'a', b'r', b'g', b's'] => {
+        [b'r', b'a', b'p', b'i', b'd', b'o', b'-', b'r', b's', b'c', b'/', b'q', b'e', b'm', b'u', b'/', b'c', b'u', b's', b't', b'o', b'm', b'_', b'a', b'r', b'g', b's'] =>
+        {
             // obsolete way for images to inject their own qemu params.
             // cut scripts should instead assert that the args required are set.
             eprintln!("ignoring qemu custom_args presence");
-        },
+        }
         // rapido-rsc/net
-        [b'r', b'a', b'p', b'i', b'd', b'o', b'-', b'r', b's', b'c', b'/',
-         b'n', b'e', b't'] => {
+        [b'r', b'a', b'p', b'i', b'd', b'o', b'-', b'r', b's', b'c', b'/', b'n', b'e', b't'] => {
             rscs.net = true;
-        },
+        }
         // catch any unprocessed rapido-rsc path, so we return true.
-        [b'r', b'a', b'p', b'i', b'd', b'o', b'-', b'r', b's', b'c', .. ] => {},
+        [b'r', b'a', b'p', b'i', b'd', b'o', b'-', b'r', b's', b'c', ..] => {}
         // not a rapido-rsc path.
         _ => return Ok(false),
     }
@@ -111,7 +108,7 @@ fn vm_resource_line_process(line: &[u8], rscs: &mut VmResources) -> io::Result<b
 
 fn vm_resources_get(initramfs_img: &str) -> io::Result<VmResources> {
     // rapido defaults
-    let mut rscs = VmResources{
+    let mut rscs = VmResources {
         cpus: 2,
         mem: "512M".to_string(),
         net: false,
@@ -128,28 +125,28 @@ fn vm_resources_get(initramfs_img: &str) -> io::Result<VmResources> {
             Err(e) => {
                 eprintln!("archive traversal failed");
                 return Err(e);
-            },
+            }
             Ok(ent) => ent,
         };
 
         match vm_resource_line_process(
             // namesize includes nul. cpio ensures 0< namesize < PATH_MAX+1
-            &ent.name[0 .. (ent.namesize as usize) - 1],
-            &mut rscs
+            &ent.name[0..(ent.namesize as usize) - 1],
+            &mut rscs,
         )? {
             true => in_rapido_rsc_path = true,
             // optimization: break loop when leaving rapido-rsc/ paths.
             // rsc entries must be placed together in the archive and can be
             // placed at the start to minimise traversal.
             false if in_rapido_rsc_path => break,
-            false => {},
+            false => {}
         }
     }
 
     Ok(rscs)
 }
 
-struct QemuArgs<'a>  {
+struct QemuArgs<'a> {
     qemu_bin: &'a str,
     kernel_img: String,
     console: &'a str,
@@ -157,7 +154,7 @@ struct QemuArgs<'a>  {
 }
 
 fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs> {
-    let mut params = vec!();
+    let mut params = vec![];
     let mut qemu_args: Option<QemuArgs> = None;
 
     //let (kconfig: String, krel: Option<&str>) = match conf.get("KERNEL_SRC") {
@@ -168,15 +165,13 @@ fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs> {
             None => {
                 let rel = host_kernel_vers()?;
                 (format!("/boot/config-{rel}"), Some(rel.to_string()))
-            },
+            }
         },
     };
 
     match fs::symlink_metadata("/dev/kvm") {
-        Ok(md) if md.file_type().is_char_device() => {
-            params.extend(["-machine", "accel=kvm"])
-        },
-        Err(_) | Ok(_) => {},
+        Ok(md) if md.file_type().is_char_device() => params.extend(["-machine", "accel=kvm"]),
+        Err(_) | Ok(_) => {}
     };
 
     let ksrc = conf.get("KERNEL_SRC");
@@ -184,7 +179,7 @@ fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs> {
     let f = fs::OpenOptions::new().read(true).open(&kconfig)?;
     for line in io::BufReader::new(f).lines().map_while(Result::ok) {
         if line == "CONFIG_X86_64=y" {
-            qemu_args = Some(QemuArgs{
+            qemu_args = Some(QemuArgs {
                 kernel_img: match ksrc {
                     Some(ks) if !ks.is_empty() => format!("{ks}/arch/x86/boot/bzImage"),
                     // krel always set without KERNEL_SRC
@@ -196,11 +191,8 @@ fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs> {
             });
             break;
         } else if line == "CONFIG_ARM64=y" {
-            params.extend([
-                "-machine", "virt,gic-version=host",
-                "-cpu", "host"
-            ]);
-            qemu_args = Some(QemuArgs{
+            params.extend(["-machine", "virt,gic-version=host", "-cpu", "host"]);
+            qemu_args = Some(QemuArgs {
                 kernel_img: match ksrc {
                     Some(ks) => format!("{ks}/arch/arm64/boot/Image"),
                     None => format!("/boot/Image-{}", krel.unwrap()),
@@ -210,8 +202,8 @@ fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs> {
                 params,
             });
             break;
-	} else if line == "CONFIG_PPC64=y" {
-            qemu_args = Some(QemuArgs{
+        } else if line == "CONFIG_PPC64=y" {
+            qemu_args = Some(QemuArgs {
                 kernel_img: match ksrc {
                     Some(ks) => format!("{ks}/arch/powerpc/boot/zImage"),
                     None => format!("/boot/vmlinux-{}", krel.unwrap()),
@@ -221,8 +213,8 @@ fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs> {
                 params,
             });
             break;
-	} else if line == "CONFIG_S390=y" {
-            qemu_args = Some(QemuArgs{
+        } else if line == "CONFIG_S390=y" {
+            qemu_args = Some(QemuArgs {
                 kernel_img: match ksrc {
                     Some(ks) => format!("{ks}/arch/s390/boot/bzImage"),
                     None => format!("/boot/bzImage-{}", krel.unwrap()),
@@ -257,13 +249,14 @@ fn host_stty_size(kcmdline: &mut String, kparam: &'static str) -> Option<()> {
     let out = match process::Command::new("stty")
         .args(&["size"])
         .stdout(process::Stdio::piped())
-        .spawn() {
+        .spawn()
+    {
         Err(_) => return None,
         Ok(p) => match p.wait_with_output() {
             Err(_) => return None,
             Ok(o) if !o.status.success() => return None,
             Ok(o) => o.stdout,
-        }
+        },
     };
 
     let mut iter = out.split(|c| !matches!(*c, b'0'..=b'9'));
@@ -285,14 +278,17 @@ fn host_stty_size(kcmdline: &mut String, kparam: &'static str) -> Option<()> {
     Some(())
 }
 
-fn vm_start(vm_num: u64, vm_pid_file: &str, initramfs_img: &str, conf: &HashMap<String,String>) -> io::Result<()> {
+fn vm_start(
+    vm_num: u64,
+    vm_pid_file: &str,
+    initramfs_img: &str,
+    conf: &HashMap<String, String>,
+) -> io::Result<()> {
     let mut qemu_args = vm_qemu_args_get(conf)?;
     // systemd (incl. networkd) needs a 32-char hex ID for dhcp leases, etc.
     let mut kcmdline = format!(
         "rdinit=/rdinit console={} rapido.vm_num={} systemd.machine_id={:032x}",
-        qemu_args.console,
-        vm_num,
-        vm_num
+        qemu_args.console, vm_num, vm_num
     );
     host_stty_size(&mut kcmdline, " rapido.stty=");
     let net_conf_dir = format!(
@@ -302,33 +298,38 @@ fn vm_start(vm_num: u64, vm_pid_file: &str, initramfs_img: &str, conf: &HashMap<
     );
 
     match fs::read_to_string(format!("{net_conf_dir}/hostname")) {
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {},
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
         Err(e) => return Err(e),
         Ok(hn) => {
             kcmdline.push_str(&format!(" rapido.hostname={}", hn.trim_end()));
-        },
+        }
     }
 
     let rscs = match vm_resources_get(&initramfs_img) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             eprintln!("no initramfs image at {initramfs_img}. Run \"cut_X\" script?");
             return Err(e);
-        },
+        }
         Err(e) => return Err(e),
         Ok(r) => r,
     };
 
     let cpus = format!("{},sockets={},cores=1,threads=1", rscs.cpus, rscs.cpus);
     qemu_args.params.extend([
-        "-smp", &cpus,
-        "-m", &rscs.mem,
-        "-kernel", &qemu_args.kernel_img,
-        "-initrd", initramfs_img,
-        "-pidfile", vm_pid_file,
+        "-smp",
+        &cpus,
+        "-m",
+        &rscs.mem,
+        "-kernel",
+        &qemu_args.kernel_img,
+        "-initrd",
+        initramfs_img,
+        "-pidfile",
+        vm_pid_file,
     ]);
 
     // params is Vec<&str>, so stash generated net Strings elsewhere
-    let mut net_params_stash: Vec<String> = vec!();
+    let mut net_params_stash: Vec<String> = vec![];
 
     if !rscs.net {
         qemu_args.params.extend(["-net", "none"]);
@@ -336,13 +337,13 @@ fn vm_start(vm_num: u64, vm_pid_file: &str, initramfs_img: &str, conf: &HashMap<
         kcmdline.push_str(" net.ifnames=0");
 
         let mut i = 0;
-	for entry in fs::read_dir(&net_conf_dir)? {
+        for entry in fs::read_dir(&net_conf_dir)? {
             let entry = entry?;
             let path = entry.path();
             match path.extension() {
                 None => continue,
                 Some(e) if e.as_encoded_bytes() != b"network" => continue,
-                Some(_) => {},
+                Some(_) => {}
             }
             let vm_tap = match path.file_stem() {
                 None => continue,
@@ -369,16 +370,16 @@ fn vm_start(vm_num: u64, vm_pid_file: &str, initramfs_img: &str, conf: &HashMap<
                             eprintln!("{:?} missing expected 0x flags prefix", tp);
                             return Err(io::Error::from(io::ErrorKind::InvalidData));
                         }
-                    },
+                    }
                 },
             };
             match tun_flags {
                 Err(_) => {
                     eprintln!("unexpected tun_flags at {:?}", tp);
                     return Err(io::Error::from(io::ErrorKind::InvalidData));
-                },
+                }
                 Ok(flags_val) if flags_val & IFF_TAP != IFF_TAP => continue,
-                Ok(_) => {},
+                Ok(_) => {}
             }
 
             let tap_mac = vm_mac_gen(vm_num, vm_tap);
@@ -388,10 +389,10 @@ fn vm_start(vm_num: u64, vm_pid_file: &str, initramfs_img: &str, conf: &HashMap<
             kcmdline.push_str(&format!(" rapido.mac.{vm_tap}={tap_mac}"));
 
             net_params_stash.extend([
-              "-device".to_string(),
-              format!("virtio-net,netdev=if{i},mac={tap_mac}"),
-              "-netdev".to_string(),
-              format!("tap,id=if{i},script=no,downscript=no,ifname={vm_tap}"),
+                "-device".to_string(),
+                format!("virtio-net,netdev=if{i},mac={tap_mac}"),
+                "-netdev".to_string(),
+                format!("tap,id=if{i},script=no,downscript=no,ifname={vm_tap}"),
             ]);
             i += 1;
         }
@@ -426,32 +427,27 @@ fn vm_start(vm_num: u64, vm_pid_file: &str, initramfs_img: &str, conf: &HashMap<
             // TODO stdout / stderr lost here?
             eprintln!("{} failed: {:?}", qemu_args.qemu_bin, e);
             Err(io::Error::from(io::ErrorKind::BrokenPipe))
-        },
+        }
         Ok(status) if !status.success() => {
             eprintln!("{} exited with status: {}", qemu_args.qemu_bin, status);
             Ok(())
-        },
+        }
         Ok(_) => Ok(()),
     }
 }
 
 fn main() -> io::Result<()> {
     let conf = match rapido::host_rapido_conf_open(rapido::RAPIDO_CONF_PATH) {
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            rapido::conf_defaults()
-        },
+        Err(e) if e.kind() == io::ErrorKind::NotFound => rapido::conf_defaults(),
         Err(e) => return Err(e),
         Ok((f, p)) => {
             let mut conf = rapido::conf_defaults();
-            if let Err(e) = kv_conf::kv_conf_process_append(
-                io::BufReader::new(f),
-                &mut conf
-            ) {
+            if let Err(e) = kv_conf::kv_conf_process_append(io::BufReader::new(f), &mut conf) {
                 eprintln!("failed to process {:?}: {:?}", p, e);
                 return Err(e);
             }
             conf
-        },
+        }
     };
     // unwrap: both keys have defaults set
     let pid_dir = conf.get("QEMU_PID_DIR").unwrap();
@@ -475,7 +471,7 @@ mod tests {
     #[test]
     fn test_vm_resources_parse() {
         let line = b"rapido-rsc/cpu/5";
-        let mut rscs = VmResources{
+        let mut rscs = VmResources {
             cpus: 0,
             mem: String::new(),
             net: false,

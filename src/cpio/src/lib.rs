@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: (GPL-2.0 OR GPL-3.0)
 // Copyright (C) 2021-2025 SUSE S.A.
 
-use std::convert::TryInto;
 use std::convert::TryFrom;
+use std::convert::TryInto;
 use std::fs;
 use std::io;
 use std::io::prelude::*;
@@ -122,12 +122,14 @@ impl ArchiveMd {
             Some(t) => t,
             None => match u32::try_from(md.mtime()) {
                 // check for 2106 epoch overflow
-                Err(_) => return Err(io::Error::new(
-                              io::ErrorKind::InvalidInput,
-                              "mtime too large for cpio",
-                          )),
+                Err(_) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "mtime too large for cpio",
+                    ))
+                }
                 Ok(m) => m,
-            }
+            },
         };
 
         let mode = md.mode();
@@ -138,11 +140,11 @@ impl ArchiveMd {
                 // uses 64-bit MMMM Mmmm mmmM MMmm, which is compatible.
                 let rd = md.rdev();
                 (
-                 u32::try_from(md.nlink()).ok(),
-                 (((rd >> 32) & 0xfffff000) | ((rd >> 8) & 0x00000fff)) as u32,
-                 (((rd >> 12) & 0xffffff00) | (rd & 0x000000ff)) as u32,
+                    u32::try_from(md.nlink()).ok(),
+                    (((rd >> 32) & 0xfffff000) | ((rd >> 8) & 0x00000fff)) as u32,
+                    (((rd >> 12) & 0xffffff00) | (rd & 0x000000ff)) as u32,
                 )
-            },
+            }
             S_IFREG => {
                 if md.nlink() > 1 {
                     // For simplicity's sake, hardlinks are archived like
@@ -156,15 +158,17 @@ impl ArchiveMd {
                     );
                 }
                 (Some(1), 0, 0)
-            },
+            }
             _ => (u32::try_from(md.nlink()).ok(), 0, 0),
         };
 
         let len = match u32::try_from(md.len()) {
-            Err(_) => return Err(io::Error::new(
-                          io::ErrorKind::InvalidInput,
-                          "file too large for newc",
-                      )),
+            Err(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "file too large for newc",
+                ))
+            }
             Ok(l) => l,
         };
 
@@ -461,10 +465,7 @@ pub fn archive_padlen(off: u64, alignment: u64) -> u64 {
     (alignment - (off & (alignment - 1))) % alignment
 }
 
-pub fn archive_trailer<W: Write>(
-    state: &mut ArchiveState,
-    mut writer: W
-) -> io::Result<u64> {
+pub fn archive_trailer<W: Write>(state: &mut ArchiveState, mut writer: W) -> io::Result<u64> {
     const FNAME: &str = "TRAILER!!!";
     const FNAME_LEN: usize = FNAME.len() + 1;
 
@@ -514,8 +515,7 @@ pub struct ArchiveEnt {
 impl ArchiveEnt {
     // panics if not valid utf-8. Check @name beforehand if undesired.
     pub fn name_str(&self) -> &str {
-        let s = str::from_utf8(&self.name[0 .. (self.namesize as usize) - 1])
-            .unwrap();
+        let s = str::from_utf8(&self.name[0..(self.namesize as usize) - 1]).unwrap();
         // data alignment optimization may leave trailing zeros. strip them...
         match s.split_once('\0') {
             None => s,
@@ -528,13 +528,9 @@ pub struct ArchiveWalker<R: Seek + Read> {
     reader: R,
 }
 
-pub fn archive_walk<R: Seek + Read>(
-    reader: R,
-) -> io::Result<ArchiveWalker<R>> {
+pub fn archive_walk<R: Seek + Read>(reader: R) -> io::Result<ArchiveWalker<R>> {
     // kernel extraction skips zeros until header. we don't.
-    Ok(ArchiveWalker{
-        reader,
-    })
+    Ok(ArchiveWalker { reader })
 }
 
 fn archive_read_newc_md(hdr_md: &[u8]) -> io::Result<(ArchiveMd, u32)> {
@@ -545,11 +541,14 @@ fn archive_read_newc_md(hdr_md: &[u8]) -> io::Result<(ArchiveMd, u32)> {
                 return Ok(u);
             }
         }
-        Err(io::Error::new(io::ErrorKind::InvalidData, "invalid hdr field"))
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid hdr field",
+        ))
     });
 
     // unwrap here because successfully read NEWC_HDR_LEN bytes
-    let md = ArchiveMd{
+    let md = ArchiveMd {
         // skip ino
         mode: md_iter.nth(1).unwrap()?,
         uid: md_iter.next().unwrap()?,
@@ -563,9 +562,10 @@ fn archive_read_newc_md(hdr_md: &[u8]) -> io::Result<(ArchiveMd, u32)> {
     };
     let namesize = md_iter.next().unwrap()?;
     if namesize == 0 || namesize > (PATH_MAX + 1) as u32 {
-        return Err(
-            io::Error::new(io::ErrorKind::InvalidData, "invalid namesize")
-        );
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid namesize",
+        ));
     }
 
     Ok((md, namesize))
@@ -580,7 +580,7 @@ impl<R: Seek + Read> Iterator for ArchiveWalker<R> {
             return match e.kind() {
                 io::ErrorKind::UnexpectedEof => None,
                 _ => Some(Err(e)),
-            }
+            };
         }
         match hdr_buf {
             // we only support newc
@@ -590,7 +590,7 @@ impl<R: Seek + Read> Iterator for ArchiveWalker<R> {
                     Ok((md, ns)) => (md, ns),
                 };
                 let mut buf = [0u8; (PATH_MAX + 1) as usize];
-                let mut fbuf = &mut buf[0 .. namesize as usize];
+                let mut fbuf = &mut buf[0..namesize as usize];
                 if let Err(e) = self.reader.read_exact(&mut fbuf) {
                     return Some(Err(e));
                 }
@@ -602,23 +602,24 @@ impl<R: Seek + Read> Iterator for ArchiveWalker<R> {
                 if let Err(e) = self.reader.seek(io::SeekFrom::Current(seeklen)) {
                     return Some(Err(e));
                 }
-                if &buf[0 .. (namesize as usize) - 1] == b"TRAILER!!!" {
+                if &buf[0..(namesize as usize) - 1] == b"TRAILER!!!" {
                     // cpio trailer treated the same as EOF
                     return None;
                 }
-                let ae = ArchiveEnt{
+                let ae = ArchiveEnt {
                     md,
                     namesize,
                     name: buf,
                     // provide data offset here, to allow callers to grab it?
                 };
                 Some(Ok(ae))
-            },
-            [ _bad_hdr @ .. ] => {
-                return Some(Err(
-                    io::Error::new(io::ErrorKind::InvalidInput, "invalid newc hdr")
-                ));
-            },
+            }
+            [_bad_hdr @ ..] => {
+                return Some(Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "invalid newc hdr",
+                )));
+            }
         }
     }
 }
@@ -632,7 +633,7 @@ mod tests {
     fn test_archive_iter() {
         let mut c = io::Cursor::new(Vec::new());
         let props = ArchiveProperties::default();
-        let amd = ArchiveMd{
+        let amd = ArchiveMd {
             nlink: 1,
             mode: S_IFDIR | 0o777,
             uid: 1,
@@ -654,12 +655,12 @@ mod tests {
 
         assert_eq!(
             ae,
-            ArchiveEnt{
+            ArchiveEnt {
                 md: amd,
                 namesize: ("hello".len() + 1).try_into().unwrap(),
                 name: {
                     let mut buf = [0u8; (PATH_MAX + 1) as usize];
-                    let mut fbuf = &mut buf[0 .. (PATH_MAX + 1) as usize];
+                    let mut fbuf = &mut buf[0..(PATH_MAX + 1) as usize];
                     fbuf.write_all("hello".as_bytes()).unwrap();
                     buf
                 },
@@ -694,13 +695,15 @@ mod tests {
             namesize = 2,
             chksum = 0,
             fname = "A",
-        ).unwrap();
+        )
+        .unwrap();
         // namesize=2 is 4-byte aligned: (110 + 2)
         c.seek(io::SeekFrom::Start(0)).unwrap();
         let mut aw = archive_walk(c).unwrap();
         assert_eq!(
             aw.next().unwrap().unwrap_err().kind(),
-            io::ErrorKind::InvalidInput);
+            io::ErrorKind::InvalidInput
+        );
 
         // good magic, corrupt each field with non-hex
         for corrupt_field in 0..12 {
@@ -724,11 +727,12 @@ mod tests {
                 namesize = 2,
                 chksum = 0,
                 fname = "A",
-            ).unwrap();
+            )
+            .unwrap();
             // namesize=2 is 4-byte aligned: (110 + 2)
 
             // matches above
-            let amd = ArchiveMd{
+            let amd = ArchiveMd {
                 mode: 1,
                 uid: 2,
                 gid: 3,
@@ -748,24 +752,21 @@ mod tests {
             let ent = aw.next().unwrap();
 
             // ino, major, minor and chksum are ignored, so won't cause an error
-            match corrupt_field  {
+            match corrupt_field {
                 0 | 7 | 8 | 12 => assert_eq!(
                     ent.unwrap(),
-                    ArchiveEnt{
+                    ArchiveEnt {
                         md: amd,
                         namesize: 2,
                         name: {
                             let mut buf = [0u8; (PATH_MAX + 1) as usize];
-                            let mut fbuf = &mut buf[0 .. (PATH_MAX + 1) as usize];
+                            let mut fbuf = &mut buf[0..(PATH_MAX + 1) as usize];
                             fbuf.write_all("A".as_bytes()).unwrap();
                             buf
                         },
                     }
                 ),
-                _ => assert_eq!(
-                    ent.unwrap_err().kind(),
-                    io::ErrorKind::InvalidData
-                ),
+                _ => assert_eq!(ent.unwrap_err().kind(), io::ErrorKind::InvalidData),
             }
         }
 
@@ -775,18 +776,9 @@ mod tests {
 
     #[test]
     fn test_archive_path_trim() {
-        assert_eq!(
-            b"hello",
-            path_trim_prefixes(Path::new("hello")).unwrap()
-        );
-        assert_eq!(
-            b"hello",
-            path_trim_prefixes(Path::new("./hello")).unwrap()
-        );
-        assert_eq!(
-            b"hello",
-            path_trim_prefixes(Path::new("//hello")).unwrap()
-        );
+        assert_eq!(b"hello", path_trim_prefixes(Path::new("hello")).unwrap());
+        assert_eq!(b"hello", path_trim_prefixes(Path::new("./hello")).unwrap());
+        assert_eq!(b"hello", path_trim_prefixes(Path::new("//hello")).unwrap());
         assert_eq!(b"/", path_trim_prefixes(Path::new("/")).unwrap());
         // should prob return a single '/' for this...
         assert_eq!(b"//", path_trim_prefixes(Path::new("//")).unwrap());
@@ -797,7 +789,7 @@ mod tests {
     fn test_archive_file() {
         let mut c = io::Cursor::new(Vec::new());
         let data = b"this is some file data";
-        let amd1 = ArchiveMd{
+        let amd1 = ArchiveMd {
             nlink: 1,
             mode: S_IFREG | 0o777,
             uid: 1,
@@ -807,7 +799,7 @@ mod tests {
             rminor: 5,
             len: 0,
         };
-        let amd2 = ArchiveMd{
+        let amd2 = ArchiveMd {
             len: data.len() as u32,
             ..amd1
         };
@@ -826,12 +818,12 @@ mod tests {
 
         assert_eq!(
             aw.next().unwrap().unwrap(),
-            ArchiveEnt{
+            ArchiveEnt {
                 md: amd1,
                 namesize: (p1.as_os_str().len() + 1).try_into().unwrap(),
                 name: {
                     let mut buf = [0u8; (PATH_MAX + 1) as usize];
-                    let mut fbuf = &mut buf[0 .. (PATH_MAX + 1) as usize];
+                    let mut fbuf = &mut buf[0..(PATH_MAX + 1) as usize];
                     fbuf.write_all(p1.as_os_str().as_encoded_bytes()).unwrap();
                     buf
                 },
@@ -840,12 +832,12 @@ mod tests {
 
         assert_eq!(
             aw.next().unwrap().unwrap(),
-            ArchiveEnt{
+            ArchiveEnt {
                 md: amd2,
                 namesize: (p2.as_os_str().len() + 1).try_into().unwrap(),
                 name: {
                     let mut buf = [0u8; (PATH_MAX + 1) as usize];
-                    let mut fbuf = &mut buf[0 .. (PATH_MAX + 1) as usize];
+                    let mut fbuf = &mut buf[0..(PATH_MAX + 1) as usize];
                     fbuf.write_all(p2.as_os_str().as_encoded_bytes()).unwrap();
                     buf
                 },
@@ -861,7 +853,7 @@ mod tests {
         let mut c = io::Cursor::new(Vec::new());
         // datalen > 16-byte alignment to trigger name padding
         let data = b"this is some file data";
-        let amd1 = ArchiveMd{
+        let amd1 = ArchiveMd {
             nlink: 1,
             mode: S_IFREG | 0o777,
             uid: 1,
@@ -871,14 +863,14 @@ mod tests {
             rminor: 5,
             len: 0,
         };
-        let amd2 = ArchiveMd{
+        let amd2 = ArchiveMd {
             len: data.len() as u32,
             ..amd1
         };
 
         let p1 = Path::new("hello");
         let p2 = Path::new("bye");
-        let props = ArchiveProperties{
+        let props = ArchiveProperties {
             data_align: 16,
             ..ArchiveProperties::default()
         };
