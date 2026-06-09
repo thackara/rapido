@@ -21,9 +21,9 @@ jobs:
         run: shellcheck --severity=error autorun/*.sh cut/*.sh selftest/*.sh rapido
       - name: Run Rust format check and clippy lint
         run: |
-          cargo --version
-          cargo fmt --check --all
-          cargo clippy --offline -- -A warnings -A clippy::byte_char_slices
+          cargo --offline --version
+          cargo --offline fmt --check --all
+          cargo --offline clippy -- -A warnings -A clippy::byte_char_slices
   test:
     # aarch64 github runners don't provide kvm
     runs-on: ubuntu-latest
