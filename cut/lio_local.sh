@@ -13,6 +13,7 @@ bin blockdev
 bin cat
 bin dd
 bin df
+bin dmesg
 bin dmsetup
 bin find
 bin grep
