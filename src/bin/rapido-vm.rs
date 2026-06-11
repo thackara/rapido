@@ -417,11 +417,17 @@ fn vm_start(
         qemu_args.params.extend(qea.split(&[' ', '\n']));
     }
 
-    let mut spawned_vm = process::Command::new(qemu_args.qemu_bin)
+    let mut spawned_vm = match process::Command::new(qemu_args.qemu_bin)
         .args(qemu_args.params)
         .args(net_params_stash)
         .spawn()
-        .expect("failed to execute qemu");
+    {
+        Err(e) => {
+            eprintln!("{} failed: {:?}", qemu_args.qemu_bin, e);
+            return Err(e);
+        }
+        Ok(s) => s,
+    };
     match spawned_vm.wait() {
         Err(e) => {
             // TODO stdout / stderr lost here?
