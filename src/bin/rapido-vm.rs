@@ -153,11 +153,10 @@ struct QemuArgs<'a> {
     params: Vec<&'a str>,
 }
 
-fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs> {
+fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs<'_>> {
     let mut params = vec![];
     let mut qemu_args: Option<QemuArgs> = None;
 
-    //let (kconfig: String, krel: Option<&str>) = match conf.get("KERNEL_SRC") {
     let (kconfig, krel) = match conf.get("KERNEL_SRC") {
         Some(ks) if !ks.is_empty() => (format!("{ks}/.config"), None),
         None | Some(_) => match conf.get("KERNEL_RELEASE") {
