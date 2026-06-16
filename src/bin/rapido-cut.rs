@@ -686,7 +686,7 @@ impl GatherKmods {
 fn gather_archive_kmods<W: Seek + Write>(
     conf: &HashMap<String, String>,
     gk: &mut Option<GatherKmods>,
-    kmods: &Vec<String>,
+    kmods: &Vec<&str>,
     ignore_missing: bool,
     paths_seen: &mut HashSet<PathBuf>,
     cpio_state: &mut cpio::ArchiveState,
@@ -705,7 +705,7 @@ fn gather_archive_kmods<W: Seek + Write>(
 
     for name in kmods.iter() {
         match gather_archive_kmod_and_deps(
-            &name,
+            name,
             &kmod_dst_root,
             &kmod_ctx,
             paths_seen,
@@ -714,7 +714,7 @@ fn gather_archive_kmods<W: Seek + Write>(
         ) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 if ignore_missing {
-                    dout!("ignoring missing kmod: {}", &name);
+                    dout!("ignoring missing kmod: {}", name);
                     continue;
                 }
                 return Err(io::Error::new(
@@ -1097,11 +1097,7 @@ fn main() -> io::Result<()> {
         &mut cpio_writer,
     )?;
 
-    // TODO avoid stringify
-    let conf_kmods = rapido::conf_kmod_deps(&conf)
-        .into_iter()
-        .map(|s| s.to_string())
-        .collect();
+    let conf_kmods = rapido::conf_kmod_deps(&conf);
     gather_archive_kmods(
         &conf,
         &mut gk,
@@ -1420,7 +1416,7 @@ fn manifest_parse_one<W: Seek + Write>(
             Some(kmod) => gather_archive_kmods(
                 conf,
                 gk,
-                &mut vec![kmod.to_string()],
+                &vec![kmod],
                 false,
                 paths_seen,
                 cpio_state,
@@ -1434,7 +1430,7 @@ fn manifest_parse_one<W: Seek + Write>(
                     gather_archive_kmods(
                         conf,
                         gk,
-                        &mut vec![kmod.to_string()],
+                        &vec![kmod],
                         // ignore_missing:
                         true,
                         paths_seen,
