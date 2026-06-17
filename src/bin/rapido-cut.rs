@@ -686,7 +686,7 @@ impl GatherKmods {
 fn gather_archive_kmods<W: Seek + Write>(
     conf: &HashMap<String, String>,
     gk: &mut Option<GatherKmods>,
-    kmods: &Vec<&str>,
+    kmods: &[&str],
     ignore_missing: bool,
     paths_seen: &mut HashSet<PathBuf>,
     cpio_state: &mut cpio::ArchiveState,
@@ -1416,7 +1416,7 @@ fn manifest_parse_one<W: Seek + Write>(
             Some(kmod) => gather_archive_kmods(
                 conf,
                 gk,
-                &vec![kmod],
+                &[kmod],
                 false,
                 paths_seen,
                 cpio_state,
@@ -1430,7 +1430,7 @@ fn manifest_parse_one<W: Seek + Write>(
                     gather_archive_kmods(
                         conf,
                         gk,
-                        &vec![kmod],
+                        &[kmod],
                         // ignore_missing:
                         true,
                         paths_seen,
