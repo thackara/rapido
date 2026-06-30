@@ -153,19 +153,67 @@ struct QemuArgs<'a> {
     params: Vec<&'a str>,
 }
 
+fn ks_kernel_img(
+    ksrc: Option<&String>,
+    ks_relpath: &'static str,
+    host_prefix: &'static str,
+    // krel must be set if ksrc is None
+    krel: Option<&String>,
+) -> io::Result<String> {
+    let p = match ksrc {
+        Some(ks) if !ks.is_empty() => format!("{ks}/{ks_relpath}"),
+        None | Some(_) => {
+            // Look first under /boot, return if exists or try /usr/lib/modules
+            let p = format!("/boot/{}-{}", host_prefix, krel.unwrap());
+            if path::Path::new(&p).is_file() {
+                return Ok(p);
+            }
+            format!("/usr/lib/modules/{}/{}", krel.unwrap(), host_prefix)
+            // Check /lib/modules too? Old Leap systems, which use the /lib
+            // path should always carry a kernel under /boot, so I think we can
+            // skip it for now.
+        }
+    };
+    if !path::Path::new(&p).is_file() {
+        eprintln!(
+            "no kernel image present at {}, wrong detection or build needed",
+            p
+        );
+        return Err(io::Error::from(io::ErrorKind::NotFound));
+    }
+    Ok(p)
+}
+
 fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs<'_>> {
     let mut params = vec![];
     let mut qemu_args: Option<QemuArgs> = None;
+    let mut oo = fs::OpenOptions::new();
+    let host_kver;
 
-    let (kconfig, krel) = match conf.get("KERNEL_SRC") {
-        Some(ks) if !ks.is_empty() => (format!("{ks}/.config"), None),
-        None | Some(_) => match conf.get("KERNEL_RELEASE") {
-            Some(rel) => (format!("/boot/config-{rel}"), Some(rel.clone())),
-            None => {
-                let rel = host_kernel_vers()?;
-                (format!("/boot/config-{rel}"), Some(rel.to_string()))
+    let (kconfig_f, krel) = match conf.get("KERNEL_SRC") {
+        Some(ks) if !ks.is_empty() => (oo.read(true).open(format!("{ks}/.config"))?, None),
+        None | Some(_) => {
+            let krel = match conf.get("KERNEL_RELEASE") {
+                Some(rel) => rel,
+                None => {
+                    host_kver = host_kernel_vers()?;
+                    &host_kver
+                }
+            };
+            match oo.read(true).open(format!("/boot/config-{krel}")) {
+                Err(_) => match oo
+                    .read(true)
+                    .open(format!("/usr/lib/modules/{krel}/config"))
+                {
+                    Err(e) => {
+                        eprintln!("failed to find {krel} host kernel config");
+                        return Err(e);
+                    }
+                    Ok(f) => (f, Some(krel)),
+                },
+                Ok(f) => (f, Some(krel)),
             }
-        },
+        }
     };
 
     match fs::symlink_metadata("/dev/kvm") {
@@ -175,15 +223,10 @@ fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs<'_>> 
 
     let ksrc = conf.get("KERNEL_SRC");
 
-    let f = fs::OpenOptions::new().read(true).open(&kconfig)?;
-    for line in io::BufReader::new(f).lines().map_while(Result::ok) {
+    for line in io::BufReader::new(kconfig_f).lines().map_while(Result::ok) {
         if line == "CONFIG_X86_64=y" {
             qemu_args = Some(QemuArgs {
-                kernel_img: match ksrc {
-                    Some(ks) if !ks.is_empty() => format!("{ks}/arch/x86/boot/bzImage"),
-                    // krel always set without KERNEL_SRC
-                    None | Some(_) => format!("/boot/vmlinuz-{}", krel.unwrap()),
-                },
+                kernel_img: ks_kernel_img(ksrc, "arch/x86/boot/bzImage", "vmlinuz", krel)?,
                 qemu_bin: "qemu-system-x86_64",
                 console: "ttyS0",
                 params,
@@ -192,10 +235,7 @@ fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs<'_>> 
         } else if line == "CONFIG_ARM64=y" {
             params.extend(["-machine", "virt,gic-version=host", "-cpu", "host"]);
             qemu_args = Some(QemuArgs {
-                kernel_img: match ksrc {
-                    Some(ks) => format!("{ks}/arch/arm64/boot/Image"),
-                    None => format!("/boot/Image-{}", krel.unwrap()),
-                },
+                kernel_img: ks_kernel_img(ksrc, "arch/arm64/boot/Image", "Image", krel)?,
                 qemu_bin: "qemu-system-aarch64",
                 console: "ttyAMA0",
                 params,
@@ -203,10 +243,7 @@ fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs<'_>> 
             break;
         } else if line == "CONFIG_PPC64=y" {
             qemu_args = Some(QemuArgs {
-                kernel_img: match ksrc {
-                    Some(ks) => format!("{ks}/arch/powerpc/boot/zImage"),
-                    None => format!("/boot/vmlinux-{}", krel.unwrap()),
-                },
+                kernel_img: ks_kernel_img(ksrc, "arch/powerpc/boot/zimage", "vmlinux", krel)?,
                 qemu_bin: "qemu-system-ppc64",
                 console: "hvc0",
                 params,
@@ -214,10 +251,7 @@ fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs<'_>> 
             break;
         } else if line == "CONFIG_S390=y" {
             qemu_args = Some(QemuArgs {
-                kernel_img: match ksrc {
-                    Some(ks) => format!("{ks}/arch/s390/boot/bzImage"),
-                    None => format!("/boot/bzImage-{}", krel.unwrap()),
-                },
+                kernel_img: ks_kernel_img(ksrc, "arch/s390/boot/bzImage", "bzImage", krel)?,
                 qemu_bin: "qemu-system-s390x",
                 console: "ttysclp0",
                 params,
@@ -232,13 +266,6 @@ fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs<'_>> 
     }
 
     let qemu_args = qemu_args.unwrap();
-    if fs::symlink_metadata(&qemu_args.kernel_img).is_err() {
-        eprintln!(
-            "no kernel image present at {}, wrong detection or build needed",
-            qemu_args.kernel_img
-        );
-        return Err(io::Error::from(io::ErrorKind::NotFound));
-    }
 
     return Ok(qemu_args);
 }
