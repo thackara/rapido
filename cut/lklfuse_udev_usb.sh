@@ -81,6 +81,7 @@ bin awk
 bin blockdev
 bin cat
 bin chmod
+bin cp
 bin cut
 bin date
 bin dd
@@ -101,6 +102,7 @@ bin lsusb
 bin mkfs
 bin mkfs.xfs
 bin mktemp
+bin mv
 bin ps
 bin rm
 bin rmdir
