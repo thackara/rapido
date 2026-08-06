@@ -15,8 +15,7 @@ use elf::endian::AnyEndian;
 use elf::ElfStream;
 
 use crosvm::argument::{self, Argument};
-mod kmod;
-use kmod::kmod_context::{KmodContext, ModuleStatus, MODULE_DB_FILES};
+use kmod_parser::{KmodContext, ModuleStatus, MODULE_DB_FILES};
 extern crate kv_conf;
 
 // FIXME: We should allow default search paths to be set at build time.

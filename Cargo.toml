@@ -14,6 +14,7 @@ default-run = "rapido-cut"
 # internal
 kv-conf = { path = "src/kv-conf" }
 cpio = { path = "src/cpio" }
+kmod-parser = { path = "src/kmod-parser" }
 
 # minimal command line parameter passing
 crosvm = { path = "src/third_party/crosvm" }

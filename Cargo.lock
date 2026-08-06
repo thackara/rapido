@@ -15,6 +15,10 @@ name = "elf"
 version = "0.8.0"
 
 [[package]]
+name = "kmod-parser"
+version = "0.1.0"
+
+[[package]]
 name = "kv-conf"
 version = "0.1.0"
 
@@ -25,5 +29,6 @@ dependencies = [
  "cpio",
  "crosvm",
  "elf",
+ "kmod-parser",
  "kv-conf",
 ]
