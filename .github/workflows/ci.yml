@@ -38,12 +38,9 @@ jobs:
       - name: cargo test
         run: |
           cargo --offline test
-          pushd src/cpio
-          cargo --offline test
-          popd
-          pushd src/kv-conf/
-          cargo --offline test
-          popd
+          cargo --offline test --manifest-path src/cpio/Cargo.toml
+          cargo --offline test --manifest-path src/kv-conf/Cargo.toml
+          cargo --offline test --manifest-path src/kmod-parser/Cargo.toml
       - name: build and setup rapido net
         run: |
           cargo --offline build --release
