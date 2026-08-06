@@ -26,6 +26,7 @@ bin du
 bin e2fsck
 bin egrep
 bin expr
+bin fallocate
 bin false
 bin fgrep
 bin filefrag
