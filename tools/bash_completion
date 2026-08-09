@@ -16,7 +16,7 @@ __rapido_complete() {
 		complete -C "$bin" rapido
 		complete -C "$bin" ./rapido
 	else
-		echo "Failed to find bash-completion binary. PATH=$PATH" >&2
+		echo "Build needed? No bash-completion binary in PATH=$p" >&2
 	fi
 }
 
