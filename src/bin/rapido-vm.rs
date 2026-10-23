@@ -160,37 +160,44 @@ fn ks_kernel_img(
     // krel must be set if ksrc is None
     krel: Option<&String>,
 ) -> io::Result<String> {
-    let p = match ksrc {
-        Some(ks) if !ks.is_empty() => format!("{ks}/{ks_relpath}"),
-        None | Some(_) => {
-            // Look first under /boot, return if exists or try /usr/lib/modules
-            let p = format!("/boot/{}-{}", host_prefix, krel.unwrap());
-            if path::Path::new(&p).is_file() {
-                return Ok(p);
+    match ksrc {
+        Some(ks) if !ks.is_empty() => {
+            let p = format!("{ks}/{ks_relpath}");
+            if !path::Path::new(&p).is_file() {
+                eprintln!("no kernel image present at {}, build needed?", p);
+                return Err(io::Error::from(io::ErrorKind::NotFound));
             }
-            format!("/usr/lib/modules/{}/{}", krel.unwrap(), host_prefix)
+            Ok(p)
+        }
+        None | Some(_) => {
+            let krel = krel.unwrap();
             // Check /lib/modules too? Old Leap systems, which use the /lib
             // path should always carry a kernel under /boot, so I think we can
             // skip it for now.
+            let mut missing = vec![];
+            for p in [
+                format!("/boot/{host_prefix}-{krel}"),
+                format!("/usr/lib/modules/{krel}/{host_prefix}"),
+            ] {
+                if !path::Path::new(&p).is_file() {
+                    missing.push(p);
+                    continue;
+                }
+                return Ok(p);
+            }
+            eprintln!("no distro kernel found under {:?}", missing);
+            Err(io::Error::from(io::ErrorKind::NotFound))
         }
-    };
-    if !path::Path::new(&p).is_file() {
-        eprintln!(
-            "no kernel image present at {}, wrong detection or build needed",
-            p
-        );
-        return Err(io::Error::from(io::ErrorKind::NotFound));
     }
-    Ok(p)
 }
 
 fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs<'_>> {
-    let mut params = vec![];
     let mut qemu_args: Option<QemuArgs> = None;
     let mut oo = fs::OpenOptions::new();
     let host_kver;
+    let ksrc = conf.get("KERNEL_SRC");
 
-    let (kconfig_f, krel) = match conf.get("KERNEL_SRC") {
+    let (kconfig_f, krel) = match ksrc {
         Some(ks) if !ks.is_empty() => (oo.read(true).open(format!("{ks}/.config"))?, None),
         None | Some(_) => {
             let krel = match conf.get("KERNEL_RELEASE") {
@@ -216,12 +223,10 @@ fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs<'_>> 
         }
     };
 
-    match fs::symlink_metadata("/dev/kvm") {
-        Ok(md) if md.file_type().is_char_device() => params.extend(["-machine", "accel=kvm"]),
-        Err(_) | Ok(_) => {}
+    let mut params = match fs::symlink_metadata("/dev/kvm") {
+        Ok(md) if md.file_type().is_char_device() => vec!["-machine", "accel=kvm"],
+        Err(_) | Ok(_) => vec![],
     };
-
-    let ksrc = conf.get("KERNEL_SRC");
 
     for line in io::BufReader::new(kconfig_f).lines().map_while(Result::ok) {
         if line == "CONFIG_X86_64=y" {
@@ -233,6 +238,7 @@ fn vm_qemu_args_get(conf: &HashMap<String, String>) -> io::Result<QemuArgs<'_>> 
             });
             break;
         } else if line == "CONFIG_ARM64=y" {
+            // FIXME: gic-version and cpu=host require KVM
             params.extend(["-machine", "virt,gic-version=host", "-cpu", "host"]);
             qemu_args = Some(QemuArgs {
                 kernel_img: ks_kernel_img(ksrc, "arch/arm64/boot/Image", "Image", krel)?,
@@ -534,5 +540,14 @@ mod tests {
 
         let line = b"rapido-rsc/mem/5mG";
         assert!(vm_resource_line_process(line, &mut rscs).is_err());
+    }
+
+    // can we locate this host's distro kconfig and kernel files?
+    #[test]
+    fn test_vm_distro_kconfig_kernel() {
+        // empty conf: no KERNEL_SRC or KERNEL_RELEASE settings
+        let conf: HashMap<String, String> = HashMap::new();
+        let qemu_args = vm_qemu_args_get(&conf).unwrap();
+        assert_eq!(path::Path::new(&qemu_args.kernel_img).is_file(), true);
     }
 }
