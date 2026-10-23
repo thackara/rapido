@@ -1,0 +1,48 @@
+name: Code Coverage
+
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Install diff-cover
+        run: pip install diff-cover
+
+      - name: Generate coverage reports per crate
+        run: |
+          cargo llvm-cov --remap-path-prefix --lcov --output-path rapido.info \
+            --ignore-filename-regex 'third_party|/target/|\.cargo/registry'
+
+          cargo llvm-cov --manifest-path src/cpio/Cargo.toml --remap-path-prefix --lcov --output-path cpio.info \
+            --ignore-filename-regex 'third_party|/target/|\.cargo/registry'
+
+          cargo llvm-cov --manifest-path src/kv-conf/Cargo.toml --remap-path-prefix --lcov --output-path kv-conf.info \
+            --ignore-filename-regex 'third_party|/target/|\.cargo/registry'
+
+          cargo llvm-cov --manifest-path src/kmod-parser/Cargo.toml --remap-path-prefix --lcov --output-path kmod-parser.info \
+            --ignore-filename-regex 'third_party|/target/|\.cargo/registry'
+
+      - name: Annotate PR Diff Coverage
+        run: |
+          BASE_REF="${{ github.base_ref }}"
+          TARGET_BRANCH="origin/${BASE_REF:-master}"
+          diff-cover rapido.info cpio.info kv-conf.info kmod-parser.info \
+            --compare-branch "$TARGET_BRANCH" \
+            --format github-annotations:warning,markdown:summary.md
+
+      - name: Add summary to job summary
+        if: always()
+        run: |
+          if [ -f summary.md ]; then
+            cat summary.md >> $GITHUB_STEP_SUMMARY
+          fi
